@@ -1,1 +1,5 @@
 *.gz
+*.actual
+*.expected
+*.in
+*.out

@@ -7,6 +7,21 @@
 -- output {
 --    5i32
 -- }
+-- compiled input {
+--     [1i32, 0i32, 3i32, 3i32, 3i32, 6i32, 7i32, 8i32, 9i32, 10i32]
+-- }
+-- output {
+--     3i32
+-- }
+-- compiled input {
+--     [1i32, 0i32, 1i32, 0i32, 1i32, 0i32, 1i32, 0i32, 1i32, 0i32]
+-- }
+-- output {
+--     1i32
+-- }
+
+-- Benchmarking
+-- compiled random input { [100000]i32 }
 
 import "lssp"
 import "lssp-seq"
