@@ -1,0 +1,133 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{listings}
+\begin{document}
+\section{Task 1 (2 pts)}
+
+\subsection{Task 1.a) Prove that a list-homomorphism induces a monoid structure (1pt)}
+
+Assume you have a well-defined list-homomorphic program $h : A \to B$, i.e., all list splitting into $x++y$ give the same result:
+
+\begin{enumerate}
+    \item $h [] = e$
+    \item $h [a] = f a$
+    \item $h (x ++ y) = (h x) \circ (h y)$
+\end{enumerate}
+
+where $\circ$ is the binary operator of the homomorphism (and does \textbf{not} denote function composition). Assume also that you may apply the third definition as well as the second one for the case when the input is a one-element list. For example, the following derivation is legal:
+
+$h [a] = h ([] ++ [a]) = (h []) \circ (h [a]) = (h []) \circ (f a)$. 
+
+Your task is to prove that $( \text{Img}(h), \circ )$ is a monoid with neutral element $e$, i.e., prove that $\circ$ is associative and that $e$ is neutral element:
+
+\begin{itemize}
+    \item prove that for any $x, y, z$ in $\text{Img}(h)$, $(x \circ y) \circ z = x \circ (y \circ z)$ (\textbf{associativity})
+    \item prove that for all $x$ in $\text{Img}(h)$, $x \circ e = e \circ x = x$ (\textbf{neutral element})
+\end{itemize}
+
+\textbf{Notation and Hint:} If $h : A \to B$, then $\text{Img}(h) = \{ h(a) | \forall a \in A \}$ is the subset of $B$ formed by applying $h$ to all elements of $A$.  It follows that for any $x$ in $\text{Img}(h)$, there exists an $a$ in $A$ such that $h(a) = x$.  The solution is short, about 6-to-8 lines.
+
+For example, for associativity, you can start by stating that, by definition of $\text{Img}$, for any $x, y, z$ in $\text{Img}(h)$, there exist $a$, $b$ and $c$ such that $x = h a$, $y = h b$ and $z = h c$. Then write a suite of equalities that takes you from the left-hand side of the equality (ultimately)  to its right-hand side:
+
+$(x \circ y) \circ z = ( (h a) \circ (h b) ) \circ (h c) = \ldots\text{continue equality-based rewriting}\ldots = x \circ (y \circ z)$
+
+Solution:
+
+\begin{enumerate}
+    \item associativity
+
+    by definition of $\text{Img}$, for any $x, y, z$ in $\text{Img}(h)$, there exist $a$, $b$ and $c$ such that $x = h a$, $y = h b$ and $z = h c$. 
+
+    we now have 
+
+    \[
+    (x \circ y) \circ z = ( (h a) \circ (h b) ) \circ (h c) 
+    \]
+
+    we know from the definition of list homomorphism that 
+
+    \[
+    (h a) \circ (h b) = h (a ++ b)
+    \]
+
+    so we can rewrite the expression as
+
+    \[
+    (h (a ++ b)) \circ (h c) = h ((a ++ b) ++ c)
+    \]
+
+    as $++$ is associative, we can further rewrite the expression as
+
+    \[
+    h ((a ++ (b ++ c)) = h (a ++ (b ++ c))
+    \]
+
+    we can now reverse out computation
+
+    \[
+    h(a ++ (b ++ c)) = h(a) \circ h(b ++ c) = h(a) \circ (h(b) \circ h(c)) = x \circ (y \circ z)
+    \]
+
+    \item neutral element
+        we have the following:\\
+        $h [a] = h ([] ++ [a]) = (h []) \circ (h [a]) = (h []) \circ (f a)$. 
+
+        let $e = h []$ be the neutral element. 
+        for any $x$ in $\text{Img}(h)$, there exists an $a$ in $A$ such that $h(a) = x$.
+
+        $ e \circ x = h [] \circ h(a) = h( [] ++ [a]) = h([a]) = x$
+
+        $ x \circ e = h(a) \circ h [] = h( [a] ++ []) = h([a]) = x$
+
+        we need to also show that exactly one such identity element exists
+
+        assume there exists two neutral elements $e$ and $e'$.
+
+        $e \circ e' = e$ by the definition of the neutral element.
+
+        $e \circ e' = e'$ by the definition of the neutral element.
+
+        $e = e'$ by the previous equalities.
+
+        therefore, there is at most one neutral element.
+\end{enumerate}
+
+\subsection{Task 1.b) Prove the Optimized Map-Reduce Lemma (1pt)}
+
+This task refers to the List Homomorphism Promotion Lemmas, which were presented in the first lecture and can be found in the lecture notes at page 17-19 inside Section 2.4.2 entitled "Other List-Homomorphism Lemmas".   \textbf{In the following $\circ$ denotes function composition}.
+
+Your task is to use the three List Homomorphism Promotion Lemmas to prove the following invariant (Theorem 4 in lecture notes):
+
+\begin{equation*}
+(\text{reduce } (+) \; 0) \circ (\text{map } f) = (\text{reduce } (+) \; 0) \circ (\text{map } ( (\text{reduce } (+) \; 0) \circ (\text{map } f) ) ) \circ \text{distr}_p
+\end{equation*}
+
+where $\text{distr}_p$  distributes the original list into a list of $p$ sublists, each sublist having about the same number of elements, and where $\circ$ denotes the operator for function composition.   Include the solution in the written (text) report. 
+
+\textbf{Big Hint:} Please observe that  $(\text{reduce } (++) \; []) \circ \text{distr}_p = \text{id}$ where $\text{id}$ is the identity function, meaning:
+
+$\text{reduce } (++) \; [] \; (\text{distr}_p \; x) = x$, for any list $x$
+
+So you should probably start by composing the identity at the end of the first (left) term and then apply the rewrite rules that match until you get the second (right) term of the equality:
+
+$(\text{reduce } (+) \; 0) \circ (\text{map } f) = (\text{reduce } (+) \; 0) \circ (\text{map } f) \circ  (\text{reduce } (++) \; []) \circ \text{distr}_p = \ldots$
+
+You should be done deducing the second term of the identity after three steps, each applying a different lemma. Should be a short solution!
+
+\section{Task 2: Longest Satisfying Segment (LSS) Problem (3pts)}
+
+Your task is to fill in the dots in the implementation of the LSS problem. Please see lecture slides or/and Sections 2.5.2 and 2.5.3 in lecture notes, pages 20-21. The handed-in code provides three programs (\texttt{lssp-same.fut}, \texttt{lssp-zeros.fut}, \texttt{lssp-sorted.fut}), for the cases in which the predicate is \texttt{same}, \texttt{zeros}, and \texttt{sorted} (in subfolder \texttt{lssp}).    They all call the \texttt{lssp} function with its own predicate; the \texttt{lssp} (generic) function is for you to implement in the \texttt{lssp.fut} file.  A generic sequential implementation is also provided in file \texttt{lssp-seq.fut}; you may test it by calling \texttt{lssp\_seq} instead of \texttt{lssp} (and by commenting out the \texttt{import "lssp"}) in each of the three files---but then remember to compile with \texttt{futhark c}, otherwise it will be very slow. Your task is to
+
+\begin{itemize}
+    \item implement the LSS problem in Futhark by filing in the missing lines in file \texttt{lssp.fut}.  
+    \begin{itemize}
+        \item add one or more small datasets---reference input and output directly in the main files \texttt{lssp-same.fut}, \texttt{lssp-zeros.fut}, \texttt{lssp-sorted.fut}---for each predicate (zeros, sorted, same) and make sure that your program validates on all three predicates by running \texttt{futhark test --backend=cuda lssp-sorted.fut} and so on.
+        \item add a couple of larger datasets and automatically benchmark the sequential and parallel version of the code, e.g., by using \texttt{futhark bench --backend=c ...} and \texttt{futhark bench --backend=cuda ...}, respectively. (Improved sequential runtime \texttt{--backend=c} can be achieved when using the function \texttt{lssp\_seq} instead of \texttt{lssp}, but it is not mandatory.)  Report the runtimes and the speedup achieved by GPU acceleration.  Several ways of integrating datasets directly in the Futhark program are demonstrated in github file \texttt{HelperCode/Lect-1-LH/mssp.fut}
+        \item submit your code \texttt{lssp.fut} (together with all the other provided code, so that your TAs do not have to move files around).
+    \end{itemize}
+    \item include in your written report (1) your solution,  i.e., the five missing lines in Section 2.5.3 of lecture notes, (2) the validation tests you added and (3) the runtimes and speedups obtained in comparison with the sequential implementation. 
+\end{itemize}
+
+\textbf{Redundant Observation:} We have also included a sequential generic version of LSSP, its implementation is in file \texttt{lssp-seq.fut}. You may enable it from any instances, for example by uncommenting in file \texttt{lssp-same.fut} the line \texttt{lssp\_seq pred1 pred2 xs} (and commenting the other one). However, if you do that, then compile with the \texttt{c} backend (\texttt{cuda} will take forever because you are running a sequential program). 
+\end{document}
