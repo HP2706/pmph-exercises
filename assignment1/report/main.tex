@@ -184,6 +184,9 @@ Your task is to fill in the dots in the implementation of the LSS problem. Pleas
 
         \end{lstlisting}
         \item add one or more small datasets---reference input and output directly in the main files \texttt{lssp-same.fut}, \texttt{lssp-zeros.fut}, \texttt{lssp-sorted.fut}---for each predicate (zeros, sorted, same) and make sure that your program validates on all three predicates by running \texttt{futhark test --backend=cuda lssp-sorted.fut} and so on.
+        
+        we write the test and confirm all 3 predicates work. This can be tested by running "bash validate.bash"
+
         \item add a couple of larger datasets and automatically benchmark the sequential and parallel version of the code, e.g., by using \texttt{futhark bench --backend=c ...} and \texttt{futhark bench --backend=cuda ...}, respectively. (Improved sequential runtime \texttt{--backend=c} can be achieved when using the function \texttt{lssp\_seq} instead of \texttt{lssp}, but it is not mandatory.)  Report the runtimes and the speedup achieved by GPU acceleration.  Several ways of integrating datasets directly in the Futhark program are demonstrated in github file \texttt{HelperCode/Lect-1-LH/mssp.fut}
         \item submit your code \texttt{lssp.fut} (together with all the other provided code, so that your TAs do not have to move files around).
     \end{itemize}
@@ -191,4 +194,62 @@ Your task is to fill in the dots in the implementation of the LSS problem. Pleas
 \end{itemize}
 
 \textbf{Redundant Observation:} We have also included a sequential generic version of LSSP, its implementation is in file \texttt{lssp-seq.fut}. You may enable it from any instances, for example by uncommenting in file \texttt{lssp-same.fut} the line \texttt{lssp\_seq pred1 pred2 xs} (and commenting the other one). However, if you do that, then compile with the \texttt{c} backend (\texttt{cuda} will take forever because you are running a sequential program). 
+\section{Task 3: CUDA exercise (3pts)}
+
+This task involves writing a CUDA program that implements two functions to map the function $f(x) = (\frac{x}{x-2.3})^3$ to an array of size 753411. The program should include both a serial CPU implementation and a parallel GPU implementation.
+
+\subsection{Program Requirements}
+
+\begin{itemize}
+    \item Implement two functions:
+    \begin{enumerate}
+        \item A serial map performed on the CPU
+        \item A parallel map in CUDA performed on the GPU
+    \end{enumerate}
+    \item Use single precision float
+    \item Apply the function to the array [1, ..., 753411]
+    \item Validate results: Check that CPU and GPU results are equal (within an epsilon error)
+    \item Print "VALID" or "INVALID" based on the validation
+    \item Report:
+    \begin{enumerate}
+        \item Runtimes of CUDA vs CPU-sequential implementation
+        \item Acceleration speedup
+        \item Memory throughput (GB/sec) of the CUDA implementation
+    \end{enumerate}
+    \item Determine the maximal memory throughput by increasing array size
+\end{itemize}
+
+\subsection{Measurement Guidelines}
+
+\begin{itemize}
+    \item For CUDA runtime, exclude CPU-to-GPU transfer and GPU memory allocation time
+    \item Call the CUDA kernel in a loop (e.g., 300 iterations)
+    \item Use \texttt{cudaDeviceSynchronize()} after the loop
+    \item Measure time before the loop and after \texttt{cudaDeviceSynchronize()}
+    \item Report average kernel time (total time divided by loop count)
+\end{itemize}
+
+\subsection{Submission Requirements}
+
+\begin{itemize}
+    \item Submit:
+    \begin{enumerate}
+        \item Program file: \texttt{wa1-task3.cu}
+        \item Makefile for the program
+    \end{enumerate}
+    \item Report should include:
+    \begin{enumerate}
+        \item Validation result and epsilon used
+        \item CUDA kernel code and how it was called
+        \item Computation of grid and block sizes
+        \item Array length for maximal throughput
+        \item Memory throughput for maximal length and initial length (753411)
+        \item Peak memory bandwidth of GPU hardware (if not using dedicated servers)
+    \end{enumerate}
+\end{itemize}
+
+\subsection{Implementation Notes}
+
+A similar task is discussed in the first Lab slides. The github folder \texttt{HelperCode/Lab-1-Cuda} contains a naive CUDA implementation for multiplying each element of an array by two, which works for arrays smaller than 1025 elements. The code in the slides generalizes this implementation to work for arbitrary sizes and includes time instrumentation and validation.
+
 \end{document}
