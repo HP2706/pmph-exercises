@@ -111,9 +111,55 @@ $\text{reduce } (++) \; [] \; (\text{distr}_p \; x) = x$, for any list $x$
 
 So you should probably start by composing the identity at the end of the first (left) term and then apply the rewrite rules that match until you get the second (right) term of the equality:
 
-$(\text{reduce } (+) \; 0) \circ (\text{map } f) = (\text{reduce } (+) \; 0) \circ (\text{map } f) \circ  (\text{reduce } (++) \; []) \circ \text{distr}_p = \ldots$
+$(\text{reduce } (+) \; 0) \circ (\text{map } f) = (\text{reduce } (+) \; 0) \circ (\text{map } ( (\text{reduce } (+) \; 0) \circ (\text{map } f) ) ) \circ \text{distr}_p$
 
 You should be done deducing the second term of the identity after three steps, each applying a different lemma. Should be a short solution!
+
+solution:
+
+
+let $id = \text{reduce } (++)[] \circ \text{distr}_p$
+
+$(\text{reduce } (+) \; 0) \circ (\text{map } f) = (\text{reduce } (+) \; 0) \circ (\text{map } ( (\text{reduce } (+) \; 0) \circ (\text{map } f) ) ) \circ \text{distr}_p$
+
+
+we start by applying the identity
+
+\begin{align*}
+    & (\text{reduce } (+) \; 0) \circ (\text{map } f) \\
+    &= (\text{reduce } (+) \; 0) \circ (\text{map } f) \circ  (\text{reduce } (++) \; []) \circ \text{distr}_p
+    \end{align*}
+
+Now, we apply the three lemmas in sequence:
+
+\begin{enumerate}
+    \item Apply lemma 2: $(\text{map } f) \circ (\text{reduce } (++)\ []) \equiv (\text{reduce } (++)\ []) \circ (\text{map } (\text{map } f))$
+    \begin{align*}
+    &= (\text{reduce } (+) \; 0) \circ (\text{reduce } (++) \; []) \circ (\text{map } (\text{map } f)) \circ \text{distr}_p
+    \end{align*}
+
+    \item Apply lemma 3: $(\text{reduce } \odot\ e_\odot) \circ (\text{reduce } (++)\ []) \equiv (\text{reduce } \odot\ e_\odot) \circ (\text{map } (\text{reduce } \odot\ e_\odot))$
+    
+    Here, we apply the lemma with $\odot = +$ and $e_\odot = 0$. The lemma transforms:
+    
+    $(\text{reduce } (+) \; 0) \circ (\text{reduce } (++) \; [])$
+    
+    into:
+    
+    $(\text{reduce } (+) \; 0) \circ (\text{map } (\text{reduce } (+) \; 0))$
+    
+    Thus, we get:
+    \begin{align*}
+    &= (\text{reduce } (+) \; 0) \circ (\text{map } (\text{reduce } (+) \; 0)) \circ (\text{map } (\text{map } f)) \circ \text{distr}_p
+    \end{align*}
+
+    \item Apply lemma 1: $(\text{map } f) \circ (\text{map } g) \equiv \text{map}(f \circ g)$
+    \begin{align*}
+    &= (\text{reduce } (+) \; 0) \circ (\text{map } ((\text{reduce } (+) \; 0) \circ (\text{map } f))) \circ \text{distr}_p
+    \end{align*}
+\end{enumerate}
+
+
 
 \section{Task 2: Longest Satisfying Segment (LSS) Problem (3pts)}
 
