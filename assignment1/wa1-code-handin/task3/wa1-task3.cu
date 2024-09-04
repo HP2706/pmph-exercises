@@ -5,7 +5,7 @@
 #include <cuda_runtime.h>
 #include "helper.cuh"
 
-#define GPU_RUNS 1 //100
+#define GPU_RUNS 100 
 
 //$f(x) = (\frac{x}{x-2.3})^3$ to an array of size 75341
 void naive_map(float *arr, int n, float *result, int result_size) {
@@ -70,7 +70,7 @@ int main(int argc, char** argv) {
 
     // a small number of dry runs
     for(int r = 0; r < 1; r++) {
-        cuda_map<<<1, N>>>(d_in, d_out, N);
+        cuda_map<<<blocksPerGrid, threadsPerBlock>>>(d_in, d_out, N);
     }
   
 
