@@ -1,12 +1,23 @@
 #!/bin/bash
 
 # Validates all 3 predicates
-module load cuda
+
 module load futhark
-# Check if CUDA is available
+module load cuda
 
+# Parse command-line arguments
+NOCUDA=false
+for arg in "$@"; do
+    case $arg in
+        -nocuda=True)
+        NOCUDA=true
+        shift # Remove this argument from processing
+        ;;
+    esac
+done
 
-if command -v nvidia-smi &> /dev/null; then
+# Check if CUDA is available and not disabled
+if [ "$NOCUDA" = false ] && command -v nvidia-smi &> /dev/null; then
     BACKENDS=("cuda" "c")
 else
     BACKENDS=("c")
@@ -21,4 +32,6 @@ for BACKEND in "${BACKENDS[@]}"; do
     futhark test --backend=$BACKEND lssp-sorted.fut
     echo "Validating lssp-same.fut"
     futhark test --backend=$BACKEND lssp-same.fut
+
+    echo "----------------------------------------"
 done

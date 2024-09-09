@@ -4,21 +4,21 @@
 --
 -- ==
 -- entry: main
--- input { [1i32, -2, -2, 0, 0, 0, 3, 4, -6, 1] }
+-- 
+-- input { [0i32,0, 0, 0, 0, 0, 0, 0, 0, 0, 1] }
+-- output { 10i32 }
+--
+-- input { [1i32, -2, -2, 0, 0, 0, 3, 4, -6] }
 -- output { 3i32 }
 --
--- input { [0i32, 1, 0, 0 ,2, 0, 3, 0, 0, 4, 0] }
+-- input { [0i32, 1, 0, 0 ,3, 0, 0, 4, 0] }
 -- output { 2i32 }
--- 
--- input { [0i32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1] }
--- output { 10i32 }
+--
+-- input { [0i32, 1, 0, 0, 1]}
+-- output { 2i32 }
 
 -- Benchmarking
 -- compiled random input { [100000]i32 }
-
-
-
-
 
 import "lssp-seq"
 import "lssp"

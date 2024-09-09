@@ -18,20 +18,14 @@ let lss_redOp (pred2: i32 -> i32 -> bool)
               ((y_lss, y_lis, y_lcs, y_len, y_first, y_last): lss_t)
                 : lss_t =
 
-  -- x_lss : length of longest satisfying segment ending at x_last
-  -- x_lis : length of longest increasing segment ending at x_last
-  -- x_lcs : length of longest common suffix of x and the segment ending at x_last
-  -- x_len : length of the segment ending at x_last
-  -- x_first : first element of the segment ending at x_last
-  -- x_last : last element of the segment ending at x_last
   -- Weekly 1, task 2 -- LSSP
   let segments_connect = x_len == 0 || y_len == 0 || pred2 x_last y_first
 
-  let new_lss = if segments_connect
-                then max (max x_lss y_lss) (x_lcs + y_lis)
-                else max x_lss y_lss
-  let new_lis = if segments_connect then x_lis + y_lis else y_lis
+  let new_lss = max (max x_lss y_lss) (if segments_connect then x_lcs + y_lis else 0)
+
+  let new_lis = if segments_connect then x_lis + y_lis else x_lis
   let new_lcs = if segments_connect then x_lcs + y_lcs else y_lcs
+
   let new_len = x_len + y_len
 
   let new_first = if x_len == 0 then y_first else x_first
