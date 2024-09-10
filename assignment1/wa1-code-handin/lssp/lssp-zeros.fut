@@ -30,4 +30,16 @@ let main (xs: []i32) : i32 =
   in  lssp pred1 pred2 xs
 
 
+-- ==
+-- entry: onlybench
+-- input @ data.in
+-- output @ data_zeros.out
+
+entry onlybench (xs: []i32) : i32 =
+  let pred1 x   = (x == 0)
+  let pred2 x y = (x == 0) && (y == 0)
+--  in  lssp_seq pred1 pred2 xs
+  in  lssp pred1 pred2 xs
+
+
 

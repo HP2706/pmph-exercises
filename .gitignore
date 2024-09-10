@@ -3,3 +3,10 @@
 *.expected
 *.in
 *.out
+*.actual
+*.c
+*.in
+*.out
+*
+!*.*
+!*/

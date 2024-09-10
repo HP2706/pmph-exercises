@@ -20,8 +20,10 @@
 --     2i32
 -- }
 
--- Benchmarking
--- compiled random input { [100000]i32 }
+-- ==
+-- entry: onlybench
+-- input @ data.in
+-- output @ data_same.out
 
 import "lssp"
 import "lssp-seq"
@@ -33,3 +35,15 @@ let main (xs: []i32) : i32 =
   in  lssp pred1 pred2 xs
 
 --TODO: implement for a larger dataset to be sure of correctness
+
+
+
+-- ==
+-- entry: onlybench
+-- input @ data.in
+-- output @ data_same.out
+entry onlybench (xs: []i32) : i32 =
+  let pred1 _x = true
+  let pred2 x y = (x == y)
+  --in  lssp_seq pred1 pred2 xs
+  in  lssp pred1 pred2 xs
