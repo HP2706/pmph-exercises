@@ -101,9 +101,8 @@ let sgmSumF32 [n] (flags: [n]bool) (vals: [n]f32) : [n]f32 =
 ---    of the segment.
 -----------------------------------------------------
 
-
 -- mkFlagArray: inspired by lecture notes page 48
-let mkFlagArray 't [m] 
+let mkFlagArray 't [m]  --PROBLEM HERE THIS IS WRONG
   (aoa_shp: [m]i64) 
   (zero: t) 
   (aoa_val: [m]t) : []t = 
@@ -133,7 +132,7 @@ let spMatVctMult [num_elms][vct_len][num_rows]
   -- inp: 
   --   mat_shp[n_rows] (i64, f32)
   -- out: [n_elms] bool
-  let flag_arr = mkFlagArray mat_shp false (replicate num_rows false) 
+  let flag_arr = mkFlagArray mat_shp false (replicate num_rows true) 
 
   -- we cast the flag array to the type of the products array
   let typed_flag_arr = flag_arr :> [num_elms]bool
