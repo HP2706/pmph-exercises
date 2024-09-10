@@ -11,3 +11,17 @@ data.in:                                         202μs (95% CI: [     200.2,   
 
 
 
+task3
+
+Total time: 0.740202 seconds
+Mean time per run: 0.740202 seconds
+Gigabytes per second: 814.274855
+tensor([  -0.0000,   -0.4552, -296.2964,  ...,    1.0001,    1.0001,
+           1.0001], device='cuda:0')
+
+
+Naive map took 1.83 GB/s
+The kernel took on average 4.44 microseconds. GB/sec: 135.75 over 100 runs
+VALID RESULT!
+[pvr448@hendrixfut03fl task3]$ 
+

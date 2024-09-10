@@ -23,7 +23,7 @@ def triton_map(x_ptr: tl.tensor, y_ptr: tl.tensor, B0: tl.constexpr, n: tl.int32
     # Store y values
     tl.store(y_ptr + offsets, y, mask=mask)
 
-GPU_RUNS = 100
+GPU_RUNS = 1
 N = 75341
 
 device = torch.device("cuda", 0)
