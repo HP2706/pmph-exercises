@@ -18,7 +18,6 @@ let lss_redOp (pred2: i32 -> i32 -> bool)
               ((y_lss, y_lis, y_lcs, y_len, y_first, y_last): lss_t)
                 : lss_t =
 
-  -- Weekly 1, task 2 -- LSSP
   let segments_connect = x_len == 0 || y_len == 0 || pred2 x_last y_first
 
   let new_lss = max (max x_lss y_lss) (if segments_connect then x_lcs + y_lis else 0)
