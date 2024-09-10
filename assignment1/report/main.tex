@@ -3,6 +3,40 @@
 \usepackage{amssymb}
 \usepackage{listings}
 \lstdefinelanguage{cuda}{language=C++,morekeywords={__global__,__device__,__host__,__shared__}}
+% A listings language definition for Futhark.
+
+\lstdefinelanguage{futhark}
+{
+  % list of keywords
+  morekeywords={
+    do,
+    else,
+    for,
+    if,
+    in,
+    include,
+    let,
+    loop,
+    then,
+    type,
+    val,
+    while,
+    with,
+    module,
+    def,
+    entry,
+    local,
+    open,
+    import,
+    assert,
+    match,
+    case,
+  },
+  sensitive=true, % Keywords are case sensitive.
+  morecomment=[l]{--}, % l is for line comment.
+  morestring=[b]" % Strings are enclosed in double quotes.
+}
+
 \usepackage{graphicx}
 \begin{document}
 \section{Task 1 (2 pts)}
@@ -482,5 +516,59 @@ Submit the following:
         \item The speedup of your accelerated version compared to \texttt{spMVmult-seq.fut} on a sufficiently large dataset.
     \end{itemize}
 \end{enumerate}
+
+\subsubsection*{Solution}
+
+\subsubsection*{implementation}
+
+\begin{lstlisting}[language=futhark]
+
+let spMatVctMult [num_elms][vct_len][num_rows]
+    (mat_val: [num_elms](i64, f32))
+    (mat_shp: [num_rows]i64)
+    (vct: [vct_len]f32)
+      : [num_rows]f32 =
+
+    -- we compute the flag array using the function mkFlagArray from the lecture notes p 48
+    -- the flag array gives us a boolean array where true means that the element is the last in its row.
+    let flag_arr = mkFlagArray mat_shp false (replicate num_rows true) 
+
+    -- we cast the flag array to the type of the products array
+    let typed_flag_arr = flag_arr :> [num_elms]bool
+
+    -- we map across the list of tuples index into vec with 
+    -- the first tuple element and multiply by second tuple element
+    -- this gives us the product of the matrix and the vector
+    let products = map (\(ind, value) -> 
+    value * vct[ind]
+    ) mat_val
+
+    -- we use the segmented scan to sum over the products within each row
+    let scan_res = sgmSumF32 typed_flag_arr products
+
+    -- get the indices of the last element of each by doing a scan over the row shapes
+    -- by summing we can compute the global index of the last element of each row
+    let last_indices = scan (+) 0 mat_shp
+
+    -- We Extract the last element of each segmented sum
+    let row_sums = map (
+        \i -> if i == 0 then 
+        scan_res[i]
+        else 
+        scan_res[i - 1]
+    ) last_indices
+
+    in row_sums
+\end{lstlisting}
+
+\subsubsection*{benchmarking}
+
+we benchmark on a dataset
+\begin{lstlisting}[language=bash]
+futhark dataset --i64-bounds=0:9999 -g [1000000]i64 --f32-bounds=-7.0:7.0 -g [1000000]f32 --i64-bounds=100:100 -g [10000]i64 --f32-bounds=-10.0:10.0 -g [10000]f32 > data.in
+\end{lstlisting}
+
+the sequential version takes 1676us the flat version takes 202us. which is a speedup of ~ 8x.
+
 
 \end{document}

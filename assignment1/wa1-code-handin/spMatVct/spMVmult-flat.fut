@@ -102,7 +102,7 @@ let sgmSumF32 [n] (flags: [n]bool) (vals: [n]f32) : [n]f32 =
 -----------------------------------------------------
 
 -- mkFlagArray: inspired by lecture notes page 48
-let mkFlagArray 't [m]  --PROBLEM HERE THIS IS WRONG
+let mkFlagArray 't [m]  
   (aoa_shp: [m]i64) 
   (zero: t) 
   (aoa_val: [m]t) : []t = 
