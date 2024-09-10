@@ -2,6 +2,8 @@
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{listings}
+\lstdefinelanguage{cuda}{language=C++,morekeywords={__global__,__device__,__host__,__shared__}}
+\usepackage{graphicx}
 \begin{document}
 \section{Task 1 (2 pts)}
 
@@ -191,6 +193,10 @@ Your task is to fill in the dots in the implementation of the LSS problem. Pleas
     \end{itemize}
     \item include in your written report (1) your solution,  i.e., the five missing lines in Section 2.5.3 of lecture notes, (2) the validation tests you added and (3) the runtimes and speedups obtained in comparison with the sequential implementation. 
 
+
+    \subsection*{Solution:}
+
+    \subsubsection*{1}
     \begin{lstlisting}
         let segments_connect = x_len == 0 || y_len == 0 || pred2 x_last y_first
 
@@ -206,6 +212,7 @@ Your task is to fill in the dots in the implementation of the LSS problem. Pleas
          in (new_lss, new_lis, new_lcs, new_len, new_first, new_last)
     \end{lstlisting}
 
+    \subsubsection*{2}
     the following inline tests were added to validate the program:
     \begin{lstlisting}
     -- Small dataset for sorted
@@ -270,6 +277,27 @@ Your task is to fill in the dots in the implementation of the LSS problem. Pleas
     -- output { 2i32 }
     \end{lstlisting}
 
+    \subsubsection*{3}
+
+    Runtimes and speedups:
+
+    \begin{table}[h]
+    \centering
+    \begin{tabular}{|l|c|c|c|}
+    \hline
+    Benchmark & Sequential Runtime & Parallel Runtime & Speedup \\
+    \hline
+    lssp-zeros & 1676us & 202us & 8.3x \\
+    lssp-sorted & -- & -- & -- \\
+    lssp-same & -- & -- & -- \\
+    \hline
+    \end{tabular}
+    \caption{Runtime comparison and speedup for LSSP benchmarks}
+    \label{tab:lssp-benchmarks}
+    \end{table}
+
+    Note: The values shown are placeholder values. Please replace them with the actual measured values for each benchmark.
+
 
 
 
@@ -330,8 +358,129 @@ This task involves writing a CUDA program that implements two functions to map t
     \end{enumerate}
 \end{itemize}
 
+\begin{enumerate}
+    \item Runtimes of CUDA vs CPU-sequential implementation
+    \item Acceleration speedup
+    \item Memory throughput (GB/sec) of the CUDA implementation
+    \item Determine the maximal memory throughput by increasing array size
+    \item Validation result and epsilon used
+    \item CUDA kernel code and how it was called
+    \item Computation of grid and block sizes
+    \item Array length for maximal throughput
+    \item Memory throughput for maximal length and initial length (753411)
+    \item Peak memory bandwidth of GPU hardware (if not using dedicated servers)
+\end{enumerate}
+
+\subsubsection*{Solution}
+
+\subsubsection*{Performance comparison}
+
+we benchmark the cuda kernel 300 times and take the average performance.
+
+1. Runtime: 
+    serial map: 316.00 microseconds
+    cuda map: 3.97 microseconds
+2. speedup: 316.00 microseconds / 3.97 microseconds ~ 80.00x
+3. memory throughput of cuda kernel: 151 GB/s
+
+
+\subsection*{Kernel code}
+
+\begin{lstlisting}[language=cuda]
+ __global__ void cuda_map(float* X, float* Y, int n) {
+    const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) {
+        float x = X[i]; // Load the input element
+        float temp = __fdividef(x, x - 2.3f); 
+
+        // we do this to avoid pow
+        Y[i] = temp * temp * temp;
+    }
+}
+\end{lstlisting}
+
+we compute the grid size and block size as follows:
+\begin{lstlisting}[language=cuda]
+    // Calculate the grid and block dimensions
+    int BlockSize = 1024;
+    int blocksPerGrid = (N + BlockSize - 1) / BlockSize;
+\end{lstlisting}
+
+we call the kernel 
+\begin{lstlisting}[language=cuda]
+    cuda_map<<<blocksPerGrid, BlockSize>>>(d_in, d_out, N);
+\end{lstlisting}
+
+
+
+\subsubsection*{Validation}
+
+\begin{lstlisting}[language=cuda]
+    validate<float>(h_out, h_out_seq, N, 0.000001);
+\end{lstlisting}
+
+we set $\epsilon = 10^{-6}$
+
+the validate function compares the output of the cuda kernel and the serial map and prints "VALID" if they are equal within the epsilon error.
+
+\subsubsection*{Exploring maximal memory throughput}
+
+peak bandwidth at Length = 753411: 151 GB/s
+
+to find the peak bandwidth we do a grid search over large array sizes that are powers of 2 as kernels work best when inputs are powers of 2.
+
+we found the peak bandwidth at Length = 2**25 = 33554432, the peak bandwidth is 1097.57 GB/s which is close to the peak memory bandwidth for an a100 40gb gpu which is 1555 GB/s.
+
+
+\section{Task 4: Flat Sparse-Matrix Vector Multiplication in Futhark (2pts)}
+
+This task involves writing a flat-parallel version of sparse-matrix vector multiplication in Futhark. Refer to Section 3.2.4 "Sparse-Matrix Vector Multiplication" in the lecture notes (pages 40-41) and potentially rewrite rule 5 in Section 4.1.6 "Flattening a Reduce Directly Nested in a Map".
+
+The sequential version of the code is provided as \texttt{spMVmult-seq.fut}. It can be compiled and run with:
+
+\begin{verbatim}
+$ futhark test --backend=c spMVmult-seq.fut
+$ futhark c spMVmult-seq.fut
+$ futhark dataset --i64-bounds=0:9999 -g [1000000]i64 --f32-bounds=-7.0:7.0 -g [1000000]f32 --i64-bounds=100:100 -g [10000]i64 --f32-bounds=-10.0:10.0 -g [10000]f32 | ./spMVmult-seq -t /dev/stderr -r 10 -n
+\end{verbatim}
+
+Your task is to implement a flat-parallel version in the file \texttt{spMVmult-flat.fut}, specifically in the function \texttt{spMatVctMult}. The current implementation is a dummy and needs to be replaced.
+
+\subsection{Requirements}
+
+\begin{enumerate}
+    \item Implement the flat-parallel version in \texttt{spMVmult-flat.fut}.
+    \item Add at least one more standard reference input/output dataset to the source file.
+    \item Measure and report the speedup compared to the sequential version.
+\end{enumerate}
+
+The parallel version can be tested and run with:
+
+\begin{verbatim}
+$ futhark test --backend=cuda spMVmult-flat.fut
+$ futhark cuda spMVmult-flat.fut
+$ futhark dataset --i64-bounds=0:9999 -g [1000000]i64 --f32-bounds=-7.0:7.0 -g [1000000]f32 --i64-bounds=100:100 -g [10000]i64 --f32-bounds=-10.0:10.0 -g [10000]f32 | ./spMVmult-flat -t /dev/stderr -r 10 > /dev/null
+\end{verbatim}
+
 \subsection{Implementation Notes}
 
-A similar task is discussed in the first Lab slides. The github folder \texttt{HelperCode/Lab-1-Cuda} contains a naive CUDA implementation for multiplying each element of an array by two, which works for arrays smaller than 1025 elements. The code in the slides generalizes this implementation to work for arbitrary sizes and includes time instrumentation and validation.
+\begin{itemize}
+    \item You need to compute the flag array for a given shape array. Assume all entries in the shape array are greater than zero (no empty rows).
+    \item You may use the \texttt{mkFlagArray} function if needed (see lecture notes, chapter 4, page 48, or \texttt{HelperCode/Lect-2-Flat/mk-flag-array.fut}).
+    \item Be aware of Futhark's sized types. You may need to cast arrays using the \texttt{:>} operator.
+\end{itemize}
+
+\subsection{Submission Requirements}
+
+Submit the following:
+
+\begin{enumerate}
+    \item The implemented and tested \texttt{spMVmult-flat.fut} file.
+    \item In the written report, include:
+    \begin{itemize}
+        \item The flat-parallel implementation of the \texttt{spMatVctMult} function with a brief explanation of each line's purpose.
+        \item The speedup of your accelerated version compared to \texttt{spMVmult-seq.fut} on a sufficiently large dataset.
+    \end{itemize}
+\end{enumerate}
 
 \end{document}
