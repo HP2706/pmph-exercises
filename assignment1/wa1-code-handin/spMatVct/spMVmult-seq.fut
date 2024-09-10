@@ -37,3 +37,16 @@ let main [n][m]
          (vct: []f32)
            : [m]f32 =
   spMatVctMult (zip mat_inds mat_vals) shp vct
+
+
+-- ==
+-- entry: onlybench
+-- input @ data.in
+-- output @ data.out
+entry onlybench  [n][m]
+         (mat_inds: [n]i64)
+         (mat_vals: [n]f32)
+         (shp: [m]i64)
+         (vct: []f32)
+           : [m]f32 =
+  spMatVctMult (zip mat_inds mat_vals) shp vct

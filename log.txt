@@ -1,0 +1,13 @@
+spMVmult-seq.fut:onlybench (no tuning file):
+data.in:                                        1676μs (95% CI: [    1674.8,     1676.9])
+Benchmarking spMVmult-flat on cuda backend
+Compiling spMVmult-flat.fut...
+Reporting arithmetic mean runtime of at least 10 runs for each dataset (min 0.5s).
+More runs automatically performed for up to 300s to ensure accurate measurement.
+
+spMVmult-flat.fut:onlybench (no tuning file):
+data.in:                                         202μs (95% CI: [     200.2,      210.0])
+[pvr448@hendrixfut03fl spMatVct]$ 
+
+
+
