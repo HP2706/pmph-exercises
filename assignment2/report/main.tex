@@ -1,0 +1,43 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{listings}
+\lstdefinelanguage{cuda}{language=C++,morekeywords={__global__,__device__,__host__,__shared__}}
+% A listings language definition for Futhark.
+
+\lstdefinelanguage{futhark}
+{
+  % list of keywords
+  morekeywords={
+    do,
+    else,
+    for,
+    if,
+    in,
+    include,
+    let,
+    loop,
+    then,
+    type,
+    val,
+    while,
+    with,
+    module,
+    def,
+    entry,
+    local,
+    open,
+    import,
+    assert,
+    match,
+    case,
+  },
+  sensitive=true, % Keywords are case sensitive.
+  morecomment=[l]{--}, % l is for line comment.
+  morestring=[b]" % Strings are enclosed in double quotes.
+}
+
+\usepackage{graphicx}
+\begin{document}
+
+\end{document}
