@@ -42,7 +42,7 @@ let main (xs: []int) : int =
 -- ==
 -- entry: onlybench
 -- input @ data.in
--- output @ data_same.out
+-- output @ data_sorted.out
 
 entry onlybench (xs: []int) : int =
   let pred1 _   = true
