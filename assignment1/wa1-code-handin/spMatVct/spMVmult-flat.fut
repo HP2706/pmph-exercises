@@ -172,6 +172,9 @@ let spMatVctMult [num_elms][vct_len][num_rows]
 --   [2.0f32, 1.0f32, 0.0f32, 3.0f32]
 -- }
 -- output { [3.0f32, 0.0f32, -4.0f32, 6.0f32, 9.0f32] }
+-- input @ data.in
+-- output @ data.out
+
 
 let main [n][m]
          (mat_inds: [n]i64)

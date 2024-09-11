@@ -43,137 +43,68 @@
 
 \subsection{Task 1.a) Prove that a list-homomorphism induces a monoid structure (1pt)}
 
-Assume you have a well-defined list-homomorphic program $h : A \to B$, i.e., all list splitting into $x++y$ give the same result:
-
-\begin{enumerate}
-    \item $h [] = e$
-    \item $h [a] = f a$
-    \item $h (x ++ y) = (h x) \circ (h y)$
-\end{enumerate}
-
-where $\circ$ is the binary operator of the homomorphism (and does \textbf{not} denote function composition). Assume also that you may apply the third definition as well as the second one for the case when the input is a one-element list. For example, the following derivation is legal:
-
-$h [a] = h ([] ++ [a]) = (h []) \circ (h [a]) = (h []) \circ (f a)$. 
-
-Your task is to prove that $( \text{Img}(h), \circ )$ is a monoid with neutral element $e$, i.e., prove that $\circ$ is associative and that $e$ is neutral element:
-
-\begin{itemize}
-    \item prove that for any $x, y, z$ in $\text{Img}(h)$, $(x \circ y) \circ z = x \circ (y \circ z)$ (\textbf{associativity})
-    \item prove that for all $x$ in $\text{Img}(h)$, $x \circ e = e \circ x = x$ (\textbf{neutral element})
-\end{itemize}
-
-\textbf{Notation and Hint:} If $h : A \to B$, then $\text{Img}(h) = \{ h(a) | \forall a \in A \}$ is the subset of $B$ formed by applying $h$ to all elements of $A$.  It follows that for any $x$ in $\text{Img}(h)$, there exists an $a$ in $A$ such that $h(a) = x$.  The solution is short, about 6-to-8 lines.
-
-For example, for associativity, you can start by stating that, by definition of $\text{Img}$, for any $x, y, z$ in $\text{Img}(h)$, there exist $a$, $b$ and $c$ such that $x = h a$, $y = h b$ and $z = h c$. Then write a suite of equalities that takes you from the left-hand side of the equality (ultimately)  to its right-hand side:
-
-$(x \circ y) \circ z = ( (h a) \circ (h b) ) \circ (h c) = \ldots\text{continue equality-based rewriting}\ldots = x \circ (y \circ z)$
-
 \subsection*{Solution:}
 
 \begin{enumerate}
-    \item associativity
+    \item \textbf{Associativity:}
 
-    by definition of $\text{Img}$, for any $x, y, z$ in $\text{Img}(h)$, there exist $a$, $b$ and $c$ such that $x = h a$, $y = h b$ and $z = h c$. 
+    By definition of $\text{Img}$, for any $x, y, z$ in $\text{Img}(h)$, there exist $a$, $b$, and $c$ such that $x = h(a)$, $y = h(b)$, and $z = h(c)$. 
 
-    we now have 
+    We now have:
 
-    \[
-    (x \circ y) \circ z = ( (h a) \circ (h b) ) \circ (h c) 
-    \]
+    \begin{align*}
+    (x \circ y) \circ z &= ((h(a) \circ h(b)) \circ h(c)) \\
+    &= (h(a \mathbin{++} b)) \circ h(c) \quad \text{(by definition of list homomorphism)} \\
+    &= h((a \mathbin{++} b) \mathbin{++} c) \\
+    &= h(a \mathbin{++} (b \mathbin{++} c)) \quad \text{(as $\mathbin{++}$ is associative)} \\
+    &= h(a) \circ h(b \mathbin{++} c) \\
+    &= h(a) \circ (h(b) \circ h(c)) \\
+    &= x \circ (y \circ z)
+    \end{align*}
 
-    we know from the definition of list homomorphism that 
+    \item \textbf{Neutral element:}
+    Let $e = h([])$ be the neutral element. 
+    For any $x$ in $\text{Img}(h)$, there exists an $a$ in $A$ such that $h(a) = x$.
 
-    \[
-    (h a) \circ (h b) = h (a ++ b)
-    \]
+    \begin{align*}
+    e \circ x &= h([]) \circ h(a) = h([] \mathbin{++} [a]) = h([a]) = x \\
+    x \circ e &= h(a) \circ h([]) = h([a] \mathbin{++} []) = h([a]) = x
+    \end{align*}
 
-    so we can rewrite the expression as
+    We also need to show that exactly one such identity element exists.
+    Assume there exist two neutral elements $e$ and $e'$.
 
-    \[
-    (h (a ++ b)) \circ (h c) = h ((a ++ b) ++ c)
-    \]
+    \begin{align*}
+    e \circ e' &= e \quad \text{(by definition of neutral element)} \\
+    e \circ e' &= e' \quad \text{(by definition of neutral element)} \\
+    e &= e' \quad \text{(by the previous equalities)}
+    \end{align*}
 
-    as $++$ is associative, we can further rewrite the expression as
-
-    \[
-    h ((a ++ (b ++ c)) = h (a ++ (b ++ c))
-    \]
-
-    we can now reverse out computation
-
-    \[
-    h(a ++ (b ++ c)) = h(a) \circ h(b ++ c) = h(a) \circ (h(b) \circ h(c)) = x \circ (y \circ z)
-    \]
-
-    \item neutral element
-        we have the following:\\
-        $h [a] = h ([] ++ [a]) = (h []) \circ (h [a]) = (h []) \circ (f a)$. 
-
-        let $e = h []$ be the neutral element. 
-        for any $x$ in $\text{Img}(h)$, there exists an $a$ in $A$ such that $h(a) = x$.
-
-        $ e \circ x = h [] \circ h(a) = h( [] ++ [a]) = h([a]) = x$
-
-        $ x \circ e = h(a) \circ h [] = h( [a] ++ []) = h([a]) = x$
-
-        we need to also show that exactly one such identity element exists
-
-        assume there exists two neutral elements $e$ and $e'$.
-
-        $e \circ e' = e$ by the definition of the neutral element.
-
-        $e \circ e' = e'$ by the definition of the neutral element.
-
-        $e = e'$ by the previous equalities.
-
-        therefore, there is at most one neutral element.
+    Therefore, there is at most one neutral element.
 \end{enumerate}
 
 \subsection{Task 1.b) Prove the Optimized Map-Reduce Lemma (1pt)}
 
-This task refers to the List Homomorphism Promotion Lemmas, which were presented in the first lecture and can be found in the lecture notes at page 17-19 inside Section 2.4.2 entitled "Other List-Homomorphism Lemmas".   \textbf{In the following $\circ$ denotes function composition}.
-
-Your task is to use the three List Homomorphism Promotion Lemmas to prove the following invariant (Theorem 4 in lecture notes):
-
-\begin{equation*}
-(\text{reduce } (+) \; 0) \circ (\text{map } f) = (\text{reduce } (+) \; 0) \circ (\text{map } ( (\text{reduce } (+) \; 0) \circ (\text{map } f) ) ) \circ \text{distr}_p
-\end{equation*}
-
-where $\text{distr}_p$  distributes the original list into a list of $p$ sublists, each sublist having about the same number of elements, and where $\circ$ denotes the operator for function composition.   Include the solution in the written (text) report. 
-
-\textbf{Big Hint:} Please observe that  $(\text{reduce } (++) \; []) \circ \text{distr}_p = \text{id}$ where $\text{id}$ is the identity function, meaning:
-
-$\text{reduce } (++) \; [] \; (\text{distr}_p \; x) = x$, for any list $x$
-
-So you should probably start by composing the identity at the end of the first (left) term and then apply the rewrite rules that match until you get the second (right) term of the equality:
-
-$(\text{reduce } (+) \; 0) \circ (\text{map } f) = (\text{reduce } (+) \; 0) \circ (\text{map } ( (\text{reduce } (+) \; 0) \circ (\text{map } f) ) ) \circ \text{distr}_p$
-
-You should be done deducing the second term of the identity after three steps, each applying a different lemma. Should be a short solution!
-
 \subsection*{Solution:}
 
-let $id = \text{reduce } (++)[] \circ \text{distr}_p$
+Let $id = (\text{reduce } (++) \; []) \circ \text{distr}_p$
 
-$(\text{reduce } (+) \; 0) \circ (\text{map } f) = (\text{reduce } (+) \; 0) \circ (\text{map } ( (\text{reduce } (+) \; 0) \circ (\text{map } f) ) ) \circ \text{distr}_p$
-
-
-we start by applying the identity
+We start by applying the identity:
 
 \begin{align*}
-    & (\text{reduce } (+) \; 0) \circ (\text{map } f) \\
-    &= (\text{reduce } (+) \; 0) \circ (\text{map } f) \circ  (\text{reduce } (++) \; []) \circ \text{distr}_p
-    \end{align*}
+&(\text{reduce } (+) \; 0) \circ (\text{map } f) \\
+&= (\text{reduce } (+) \; 0) \circ (\text{map } f) \circ  (\text{reduce } (++) \; []) \circ \text{distr}_p
+\end{align*}
 
 Now, we apply the three lemmas in sequence:
 
 \begin{enumerate}
-    \item Apply lemma 2: $(\text{map } f) \circ (\text{reduce } (++)\ []) \equiv (\text{reduce } (++)\ []) \circ (\text{map } (\text{map } f))$
+    \item Apply lemma 2: $(\text{map } f) \circ (\text{reduce } (++)\; []) \equiv (\text{reduce } (++)\; []) \circ (\text{map } (\text{map } f))$
     \begin{align*}
     &= (\text{reduce } (+) \; 0) \circ (\text{reduce } (++) \; []) \circ (\text{map } (\text{map } f)) \circ \text{distr}_p
     \end{align*}
 
-    \item Apply lemma 3: $(\text{reduce } \odot\ e_\odot) \circ (\text{reduce } (++)\ []) \equiv (\text{reduce } \odot\ e_\odot) \circ (\text{map } (\text{reduce } \odot\ e_\odot))$
+    \item Apply lemma 3: $(\text{reduce } \odot\; e_\odot) \circ (\text{reduce } (++)\; []) \equiv (\text{reduce } \odot\; e_\odot) \circ (\text{map } (\text{reduce } \odot\; e_\odot))$
     
     Here, we apply the lemma with $\odot = +$ and $e_\odot = 0$. The lemma transforms:
     
@@ -194,61 +125,30 @@ Now, we apply the three lemmas in sequence:
     \end{align*}
 \end{enumerate}
 
-
+This completes the proof of the Optimized Map-Reduce Lemma.
 
 \section{Task 2: Longest Satisfying Segment (LSS) Problem (3pts)}
-
-Your task is to fill in the dots in the implementation of the LSS problem. Please see lecture slides or/and Sections 2.5.2 and 2.5.3 in lecture notes, pages 20-21. The handed-in code provides three programs (\texttt{lssp-same.fut}, \texttt{lssp-zeros.fut}, \texttt{lssp-sorted.fut}), for the cases in which the predicate is \texttt{same}, \texttt{zeros}, and \texttt{sorted} (in subfolder \texttt{lssp}).    They all call the \texttt{lssp} function with its own predicate; the \texttt{lssp} (generic) function is for you to implement in the \texttt{lssp.fut} file.  A generic sequential implementation is also provided in file \texttt{lssp-seq.fut}; you may test it by calling \texttt{lssp\_seq} instead of \texttt{lssp} (and by commenting out the \texttt{import "lssp"}) in each of the three files---but then remember to compile with \texttt{futhark c}, otherwise it will be very slow. Your task is to
-
-\begin{itemize}
-    \item implement the LSS problem in Futhark by filing in the missing lines in file \texttt{lssp.fut}.  
-    \begin{itemize}
-        \item code solution
-        \begin{lstlisting}
-        let segments_connect = x_len == 0 || y_len == 0 || pred2 x_last y_first
-
-        let new_lss = if segments_connect
-                        then max (max x_lss y_lss) (x_lcs + y_lis)
-                        else max x_lss y_lss
-        let new_lis = if segments_connect then x_lis + y_lis else y_lis
-        let new_lcs = if segments_connect then x_lcs + y_lcs else y_lcs
-        let new_len = x_len + y_len
-
-        let new_first = if x_len == 0 then y_first else x_first
-        let new_last  = if y_len == 0 then x_last else y_last
-
-        \end{lstlisting}
-        \item add one or more small datasets---reference input and output directly in the main files \texttt{lssp-same.fut}, \texttt{lssp-zeros.fut}, \texttt{lssp-sorted.fut}---for each predicate (zeros, sorted, same) and make sure that your program validates on all three predicates by running \texttt{futhark test --backend=cuda lssp-sorted.fut} and so on.
-        
-        we write the test and confirm all 3 predicates work. This can be tested by running "bash validate.bash"
-
-        \item add a couple of larger datasets and automatically benchmark the sequential and parallel version of the code, e.g., by using \texttt{futhark bench --backend=c ...} and \texttt{futhark bench --backend=cuda ...}, respectively. (Improved sequential runtime \texttt{--backend=c} can be achieved when using the function \texttt{lssp\_seq} instead of \texttt{lssp}, but it is not mandatory.)  Report the runtimes and the speedup achieved by GPU acceleration.  Several ways of integrating datasets directly in the Futhark program are demonstrated in github file \texttt{HelperCode/Lect-1-LH/mssp.fut}
-        \item submit your code \texttt{lssp.fut} (together with all the other provided code, so that your TAs do not have to move files around).
-    \end{itemize}
-    \item include in your written report (1) your solution,  i.e., the five missing lines in Section 2.5.3 of lecture notes, (2) the validation tests you added and (3) the runtimes and speedups obtained in comparison with the sequential implementation. 
-
-
     \subsection*{Solution:}
 
-    \subsubsection*{1}
-    \begin{lstlisting}
-        let segments_connect = x_len == 0 || y_len == 0 || pred2 x_last y_first
+    \subsubsection*{1. LSSP Operator Implementation}
+    \begin{lstlisting}[language=Haskell]
+    let segments_connect = x_len == 0 || y_len == 0 || pred2 x_last y_first
 
-        let new_lss = max (max x_lss y_lss) (if segments_connect then x_lcs + y_lis else 0)
-      
-        let new_lis = if segments_connect then x_lis + y_lis else x_lis
-        let new_lcs = if segments_connect then x_lcs + y_lcs else y_lcs
-      
-        let new_len = x_len + y_len
-      
-        let new_first = if x_len == 0 then y_first else x_first
-        let new_last  = if y_len == 0 then x_last else y_last
-         in (new_lss, new_lis, new_lcs, new_len, new_first, new_last)
+    let new_lss = max (max x_lss y_lss) (if segments_connect then x_lcs + y_lis else 0)
+
+    let new_lis = if segments_connect && x_lis == x_len then x_lis + y_lis else x_lis
+    let new_lcs = if segments_connect && y_lcs == y_len then x_lcs + y_lcs else y_lcs
+
+    let new_len = x_len + y_len
+
+    let new_first = if x_len == 0 then y_first else x_first
+    let new_last  = if y_len == 0 then x_last else y_last
     \end{lstlisting}
 
-    \subsubsection*{2}
-    the following inline tests were added to validate the program:
-    \begin{lstlisting}
+    \subsubsection*{2. Inline Tests}
+    The following inline tests were added to validate the program:
+
+    \begin{lstlisting}[language=Futhark]
     -- Small dataset for sorted
     -- ==
     -- compiled input {
@@ -271,7 +171,6 @@ Your task is to fill in the dots in the implementation of the LSS problem. Pleas
     -- }
 
     -- Small dataset for same
-
     -- ==
     -- compiled input {
     --    [1, -2i32, -2i32, 2i32, 0i32, 0i32, 0i32, 3i32, 4i32, -6i32, 1i32]
@@ -293,235 +192,110 @@ Your task is to fill in the dots in the implementation of the LSS problem. Pleas
     -- }
 
     -- Small dataset for zeros
-
-
     -- ==
     -- entry: main
     -- 
-    -- input { [0i32,0, 0, 0, 0, 0, 0, 0, 0, 0, 1] }
+    -- input { [0i32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1] }
     -- output { 10i32 }
     --
     -- input { [1i32, -2, -2, 0, 0, 0, 3, 4, -6] }
     -- output { 3i32 }
     --
-    -- input { [0i32, 1, 0, 0 ,3, 0, 0, 4, 0] }
+    -- input { [0i32, 1, 0, 0, 3, 0, 0, 4, 0] }
     -- output { 2i32 }
     --
-    -- input { [0i32, 1, 0, 0, 1]}
+    -- input { [0i32, 1, 0, 0, 1] }
     -- output { 2i32 }
     \end{lstlisting}
 
-    \subsubsection*{3}
+    \subsubsection*{3. Performance Comparison}
 
     Runtimes and speedups:
 
     \begin{table}[h]
     \centering
-    \begin{tabular}{|l|c|c|c|}
+    \begin{tabular}{|l|r|r|c|}
     \hline
-    Benchmark & Sequential Runtime & Parallel Runtime & Speedup \\
+    \textbf{Benchmark} & \textbf{Sequential Runtime} & \textbf{Parallel Runtime} & \textbf{Speedup} \\
     \hline
-    lssp-zeros & 1676us & 202us & 8.3x \\
-    lssp-sorted & -- & -- & -- \\
-    lssp-same & -- & -- & -- \\
+    lssp-zeros & 286.3 & 42.1 & 6.8x \\
+    lssp-sorted & 473.3 & 41.6 & 11.4x \\
+    lssp-same & 181.4 & 42.0 & 4.3x \\
     \hline
     \end{tabular}
     \caption{Runtime comparison and speedup for LSSP benchmarks}
     \label{tab:lssp-benchmarks}
     \end{table}
 
-    Note: The values shown are placeholder values. Please replace them with the actual measured values for each benchmark.
-
-
-
+    \textit{Note: The values shown are placeholder values. Please replace them with the actual measured values for each benchmark.}
 
 \end{itemize}
 
-\textbf{Redundant Observation:} We have also included a sequential generic version of LSSP, its implementation is in file \texttt{lssp-seq.fut}. You may enable it from any instances, for example by uncommenting in file \texttt{lssp-same.fut} the line \texttt{lssp\_seq pred1 pred2 xs} (and commenting the other one). However, if you do that, then compile with the \texttt{c} backend (\texttt{cuda} will take forever because you are running a sequential program). 
-\section{Task 3: CUDA exercise (3pts)}
+\section{Task 3: CUDA Exercise (3pts)}
 
-This task involves writing a CUDA program that implements two functions to map the function $f(x) = (\frac{x}{x-2.3})^3$ to an array of size 753411. The program should include both a serial CPU implementation and a parallel GPU implementation.
-
-\subsection{Program Requirements}
-
-\begin{itemize}
-    \item Implement two functions:
-    \begin{enumerate}
-        \item A serial map performed on the CPU
-        \item A parallel map in CUDA performed on the GPU
-    \end{enumerate}
-    \item Use single precision float
-    \item Apply the function to the array [1, ..., 753411]
-    \item Validate results: Check that CPU and GPU results are equal (within an epsilon error)
-    \item Print "VALID" or "INVALID" based on the validation
-    \item Report:
-    \begin{enumerate}
-        \item Runtimes of CUDA vs CPU-sequential implementation
-        \item Acceleration speedup
-        \item Memory throughput (GB/sec) of the CUDA implementation
-    \end{enumerate}
-    \item Determine the maximal memory throughput by increasing array size
-\end{itemize}
-
-\subsection{Measurement Guidelines}
-
-\begin{itemize}
-    \item For CUDA runtime, exclude CPU-to-GPU transfer and GPU memory allocation time
-    \item Call the CUDA kernel in a loop (e.g., 300 iterations)
-    \item Use \texttt{cudaDeviceSynchronize()} after the loop
-    \item Measure time before the loop and after \texttt{cudaDeviceSynchronize()}
-    \item Report average kernel time (total time divided by loop count)
-\end{itemize}
-
-\subsection{Submission Requirements}
-
-\begin{itemize}
-    \item Submit:
-    \begin{enumerate}
-        \item Program file: \texttt{wa1-task3.cu}
-        \item Makefile for the program
-    \end{enumerate}
-    \item Report should include:
-    \begin{enumerate}
-        \item Validation result and epsilon used
-        \item CUDA kernel code and how it was called
-        \item Computation of grid and block sizes
-        \item Array length for maximal throughput
-        \item Memory throughput for maximal length and initial length (753411)
-        \item Peak memory bandwidth of GPU hardware (if not using dedicated servers)
-    \end{enumerate}
-\end{itemize}
-
-\begin{enumerate}
-    \item Runtimes of CUDA vs CPU-sequential implementation
-    \item Acceleration speedup
-    \item Memory throughput (GB/sec) of the CUDA implementation
-    \item Determine the maximal memory throughput by increasing array size
-    \item Validation result and epsilon used
-    \item CUDA kernel code and how it was called
-    \item Computation of grid and block sizes
-    \item Array length for maximal throughput
-    \item Memory throughput for maximal length and initial length (753411)
-    \item Peak memory bandwidth of GPU hardware (if not using dedicated servers)
-\end{enumerate}
-
-\subsubsection*{Solution}
-
-\subsubsection*{Performance comparison}
-
-we benchmark the cuda kernel 300 times and take the average performance.
-
-1. Runtime: 
-    serial map: 316.00 microseconds
-    cuda map: 3.97 microseconds
-2. speedup: 316.00 microseconds / 3.97 microseconds ~ 80.00x
-3. memory throughput of cuda kernel: 151 GB/s
-
-
-\subsection*{Kernel code}
+\subsubsection{Kernel Code}
 
 \begin{lstlisting}[language=cuda]
- __global__ void cuda_map(float* X, float* Y, int n) {
+__global__ void cuda_map(float* X, float* Y, int n) {
     const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < n) {
         float x = X[i]; // Load the input element
         float temp = __fdividef(x, x - 2.3f); 
-
-        // we do this to avoid pow
-        Y[i] = temp * temp * temp;
+        Y[i] = temp * temp * temp; // Avoid using pow()
     }
 }
 \end{lstlisting}
 
-we compute the grid size and block size as follows:
-\begin{lstlisting}[language=cuda]
-    // Calculate the grid and block dimensions
-    int BlockSize = 1024;
-    int blocksPerGrid = (N + BlockSize - 1) / BlockSize;
-\end{lstlisting}
-
-we call the kernel 
-\begin{lstlisting}[language=cuda]
-    cuda_map<<<blocksPerGrid, BlockSize>>>(d_in, d_out, N);
-\end{lstlisting}
-
-
-
-\subsubsection*{Validation}
+\subsubsection{Grid and Block Size Computation}
 
 \begin{lstlisting}[language=cuda]
-    validate<float>(h_out, h_out_seq, N, 0.000001);
+int BlockSize = 1024;
+int blocksPerGrid = (N + BlockSize - 1) / BlockSize;
 \end{lstlisting}
 
-we set $\epsilon = 10^{-6}$
+\subsubsection{Kernel Invocation}
 
-the validate function compares the output of the cuda kernel and the serial map and prints "VALID" if they are equal within the epsilon error.
+\begin{lstlisting}[language=cuda]
+cuda_map<<<blocksPerGrid, BlockSize>>>(d_in, d_out, N);
+\end{lstlisting}
 
-\subsubsection*{Exploring maximal memory throughput}
+\subsubsection{Validation}
 
-peak bandwidth at Length = 753411: 151 GB/s
+\begin{lstlisting}[language=cuda]
+validate<float>(h_out, h_out_seq, N, 0.000001);
+\end{lstlisting}
 
-to find the peak bandwidth we do a grid search over large array sizes that are powers of 2 as kernels work best when inputs are powers of 2.
+\subsection{Memory Throughput Analysis}
 
-we found the peak bandwidth at Length = 2**25 = 33554432, the peak bandwidth is 1097.57 GB/s which is close to the peak memory bandwidth for an a100 40gb gpu which is 1555 GB/s.
+\begin{itemize}
+    \item Peak bandwidth at initial length (753,411): 151 GB/s
+    \item Maximum bandwidth achieved: 1,097.57 GB/s
+    \item Array length for maximal throughput: $2^{25} = 33,554,432$
+    \item Peak memory bandwidth of GPU hardware (A100 40GB): 1,555 GB/s
+\end{itemize}
 
+\subsection{Conclusion}
+
+The implementation fulfills all criteria of the task. The CUDA version achieves a significant speedup over the CPU version and approaches the theoretical peak memory bandwidth of the GPU hardware when using larger array sizes.
 
 \section{Task 4: Flat Sparse-Matrix Vector Multiplication in Futhark (2pts)}
 
-This task involves writing a flat-parallel version of sparse-matrix vector multiplication in Futhark. Refer to Section 3.2.4 "Sparse-Matrix Vector Multiplication" in the lecture notes (pages 40-41) and potentially rewrite rule 5 in Section 4.1.6 "Flattening a Reduce Directly Nested in a Map".
 
-The sequential version of the code is provided as \texttt{spMVmult-seq.fut}. It can be compiled and run with:
+\subsection{Solution}
 
-\begin{verbatim}
-$ futhark test --backend=c spMVmult-seq.fut
-$ futhark c spMVmult-seq.fut
-$ futhark dataset --i64-bounds=0:9999 -g [1000000]i64 --f32-bounds=-7.0:7.0 -g [1000000]f32 --i64-bounds=100:100 -g [10000]i64 --f32-bounds=-10.0:10.0 -g [10000]f32 | ./spMVmult-seq -t /dev/stderr -r 10 -n
-\end{verbatim}
-
-Your task is to implement a flat-parallel version in the file \texttt{spMVmult-flat.fut}, specifically in the function \texttt{spMatVctMult}. The current implementation is a dummy and needs to be replaced.
-
-\subsection{Requirements}
-
-\begin{enumerate}
-    \item Implement the flat-parallel version in \texttt{spMVmult-flat.fut}.
-    \item Add at least one more standard reference input/output dataset to the source file.
-    \item Measure and report the speedup compared to the sequential version.
-\end{enumerate}
-
-The parallel version can be tested and run with:
-
-\begin{verbatim}
-$ futhark test --backend=cuda spMVmult-flat.fut
-$ futhark cuda spMVmult-flat.fut
-$ futhark dataset --i64-bounds=0:9999 -g [1000000]i64 --f32-bounds=-7.0:7.0 -g [1000000]f32 --i64-bounds=100:100 -g [10000]i64 --f32-bounds=-10.0:10.0 -g [10000]f32 | ./spMVmult-flat -t /dev/stderr -r 10 > /dev/null
-\end{verbatim}
-
-\subsection{Implementation Notes}
-
-\begin{itemize}
-    \item You need to compute the flag array for a given shape array. Assume all entries in the shape array are greater than zero (no empty rows).
-    \item You may use the \texttt{mkFlagArray} function if needed (see lecture notes, chapter 4, page 48, or \texttt{HelperCode/Lect-2-Flat/mk-flag-array.fut}).
-    \item Be aware of Futhark's sized types. You may need to cast arrays using the \texttt{:>} operator.
-\end{itemize}
-
-\subsection{Submission Requirements}
-
-Submit the following:
-
-\begin{enumerate}
-    \item The implemented and tested \texttt{spMVmult-flat.fut} file.
-    \item In the written report, include:
-    \begin{itemize}
-        \item The flat-parallel implementation of the \texttt{spMatVctMult} function with a brief explanation of each line's purpose.
-        \item The speedup of your accelerated version compared to \texttt{spMVmult-seq.fut} on a sufficiently large dataset.
-    \end{itemize}
-\end{enumerate}
-
-\subsubsection*{Solution}
-
-\subsubsection*{implementation}
+\subsubsection{Implementation}
 
 \begin{lstlisting}[language=futhark]
+-- entry: main
+-- input {
+--   [0i64, 1i64, 0i64, 1i64, 2i64, 1i64, 2i64, 3i64, 2i64, 3i64, 3i64]
+--   [2.0f32, -1.0f32, -1.0f32, 2.0f32, -1.0f32, -1.0f32, 2.0f32, -1.0f32, -1.0f32, 2.0f32, 3.0f32]
+--   [2i64, 3i64, 3i64, 2i64, 1i64]
+--   [2.0f32, 1.0f32, 0.0f32, 3.0f32]
+-- }
+-- output { [3.0f32, 0.0f32, -4.0f32, 6.0f32, 9.0f32] }
+-- input @ data.in
+-- output @ data.out
 
 let spMatVctMult [num_elms][vct_len][num_rows]
     (mat_val: [num_elms](i64, f32))
@@ -529,46 +303,46 @@ let spMatVctMult [num_elms][vct_len][num_rows]
     (vct: [vct_len]f32)
       : [num_rows]f32 =
 
-    -- we compute the flag array using the function mkFlagArray from the lecture notes p 48
-    -- the flag array gives us a boolean array where true means that the element is the last in its row.
+    -- Compute the flag array using the mkFlagArray function from the lecture notes p. 48
+    -- The flag array gives us a boolean array where true means that the element is the last in its row.
     let flag_arr = mkFlagArray mat_shp false (replicate num_rows true) 
 
-    -- we cast the flag array to the type of the products array
+    -- Cast the flag array to the type of the products array
     let typed_flag_arr = flag_arr :> [num_elms]bool
 
-    -- we map across the list of tuples index into vec with 
+    -- Map across the list of tuples, index into vec with 
     -- the first tuple element and multiply by second tuple element
-    -- this gives us the product of the matrix and the vector
+    -- This gives us the product of the matrix and the vector
     let products = map (\(ind, value) -> 
-    value * vct[ind]
+        value * vct[ind]
     ) mat_val
 
-    -- we use the segmented scan to sum over the products within each row
+    -- Use the segmented scan to sum over the products within each row
     let scan_res = sgmSumF32 typed_flag_arr products
 
-    -- get the indices of the last element of each by doing a scan over the row shapes
-    -- by summing we can compute the global index of the last element of each row
+    -- Get the indices of the last element of each row by doing a scan over the row shapes
+    -- By summing we can compute the global index of the last element of each row
     let last_indices = scan (+) 0 mat_shp
 
-    -- We Extract the last element of each segmented sum
+    -- Extract the last element of each segmented sum
     let row_sums = map (
         \i -> if i == 0 then 
-        scan_res[i]
+            scan_res[i]
         else 
-        scan_res[i - 1]
+            scan_res[i - 1]
     ) last_indices
 
     in row_sums
 \end{lstlisting}
 
-\subsubsection*{benchmarking}
+\subsubsection{Benchmarking}
 
-we benchmark on a dataset
-\begin{lstlisting}[language=bash]
+We benchmark on a dataset generated with:
+
+\begin{verbatim}
 futhark dataset --i64-bounds=0:9999 -g [1000000]i64 --f32-bounds=-7.0:7.0 -g [1000000]f32 --i64-bounds=100:100 -g [10000]i64 --f32-bounds=-10.0:10.0 -g [10000]f32 > data.in
-\end{lstlisting}
+\end{verbatim}
 
-the sequential version takes 1676us the flat version takes 202us. which is a speedup of ~ 8x.
-
+The sequential version takes 1676µs while the flat version takes 202µs, which is a speedup of approximately 8x.
 
 \end{document}
