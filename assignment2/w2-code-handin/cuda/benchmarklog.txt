@@ -1,0 +1,204 @@
+Without coalesced warp reads
+
+[pvr448@hendrixfut03fl cuda]$ make run_pbb
+nvcc -O3 -o test_pbb pbb_main.cu
+./test_pbb 100003565 256
+Device name: NVIDIA A100-PCIE-40GB
+Number of hardware threads: 221184
+Max block size: 1024
+Shared memory size: 49152
+====
+Testing parallel basic blocks for input length: 100003565 and CUDA-block size: 256
+
+
+Naive Memcpy GPU Kernel runs in: 738 microsecs, GB/sec: 1084.05
+
+
+Testing Naive Reduce with Int32 Addition Operator:
+Reduce GPU Kernel runs in: 1235 microsecs, GB/sec: 323.90
+Reduce CPU Sequential runs in: 55686 microsecs, GB/sec: 7.18
+Reduce: VALID result!
+
+Testing Optimized Reduce with Int32 Addition Operator:
+Reduce GPU Kernel runs in: 392 microsecs, GB/sec: 1020.44
+Reduce CPU Sequential runs in: 55266 microsecs, GB/sec: 7.24
+Reduce: VALID result!
+
+Testing Naive Reduce with MSSP Operator:
+Reduce GPU Kernel runs in: 3615 microsecs, GB/sec: 110.65
+Reduce CPU Sequential runs in: 481332 microsecs, GB/sec: 0.83
+Reduce: VALID result!
+
+Testing Optimized Reduce with MSSP Operator:
+Reduce GPU Kernel runs in: 2219 microsecs, GB/sec: 180.27
+Reduce CPU Sequential runs in: 566981 microsecs, GB/sec: 0.71
+Reduce: VALID result!
+
+Scan Inclusive AddI32 GPU Kernel runs in: 4169 microsecs, GB/sec: 287.85
+Scan Inclusive AddI32 CPU Sequential runs in: 86867 microsecs, GB/sec: 9.21
+Scan Inclusive AddI32: VALID result!
+
+SgmScan Inclusive AddI32 GPU Kernel runs in: 3060 microsecs, GB/sec: 457.53
+SgmScan Inclusive AddI32 CPU Sequential runs in: 201003 microsecs, GB/sec: 3.98
+SgmScan Inclusive AddI32: VALID result!
+
+---- coalesced
+
+[pvr448@hendrixfut03fl cuda]$ make run_pbb
+nvcc -O3 -o test_pbb pbb_main.cu
+./test_pbb 100003565 256
+Device name: NVIDIA A100-PCIE-40GB
+Number of hardware threads: 221184
+Max block size: 1024
+Shared memory size: 49152
+====
+Testing parallel basic blocks for input length: 100003565 and CUDA-block size: 256
+
+
+Naive Memcpy GPU Kernel runs in: 738 microsecs, GB/sec: 1084.05
+
+
+Testing Naive Reduce with Int32 Addition Operator:
+Reduce GPU Kernel runs in: 1294 microsecs, GB/sec: 309.13
+Reduce CPU Sequential runs in: 55494 microsecs, GB/sec: 7.21
+Reduce: VALID result!
+
+Testing Optimized Reduce with Int32 Addition Operator:
+Reduce GPU Kernel runs in: 391 microsecs, GB/sec: 1023.05
+Reduce CPU Sequential runs in: 55878 microsecs, GB/sec: 7.16
+Reduce: VALID result!
+
+Testing Naive Reduce with MSSP Operator:
+Reduce GPU Kernel runs in: 3614 microsecs, GB/sec: 110.68
+Reduce CPU Sequential runs in: 469278 microsecs, GB/sec: 0.85
+Reduce: VALID result!
+
+Testing Optimized Reduce with MSSP Operator:
+Reduce GPU Kernel runs in: 1449 microsecs, GB/sec: 276.06
+Reduce CPU Sequential runs in: 473748 microsecs, GB/sec: 0.84
+Reduce: VALID result!
+
+Scan Inclusive AddI32 GPU Kernel runs in: 1864 microsecs, GB/sec: 643.80
+Scan Inclusive AddI32 CPU Sequential runs in: 60971 microsecs, GB/sec: 13.12
+Scan Inclusive AddI32: VALID result!
+
+SgmScan Inclusive AddI32 GPU Kernel runs in: 1356 microsecs, GB/sec: 1032.49
+SgmScan Inclusive AddI32 CPU Sequential runs in: 201509 microsecs, GB/sec: 3.97
+SgmScan Inclusive AddI32: VALID result!
+
+[pvr448@hendrixfut03fl cuda]$ 
+
+
+conclusion task 1
+
+| Operation | Non-Coalesced (GB/s) | Coalesced (GB/s) | Improvement |
+|--------------------------------|----------------------|-------------------|-------------|
+| Naive Memcpy | 1084.05 | 1084.05 | 0% |
+| Naive Reduce (AddI32) | 323.90 | 309.13 | -4.56% |
+| Optimized Reduce (AddI32) | 1020.44 | 1023.05 | +0.26% |
+| Naive Reduce (MSSP) | 110.65 | 110.68 | +0.03% |
+| Optimized Reduce (MSSP) | 180.27 | 276.06 | +53.14% |
+| Scan Inclusive (AddI32) | 287.85 | 643.80 | +123.66% |
+| SgmScan Inclusive (AddI32) | 457.53 | 1032.49 | +125.67% |
+Key observations:
+The most significant improvements are seen in Scan Inclusive and SgmScan Inclusive operations, with over 120% performance increase.
+Optimized Reduce with MSSP operator shows a substantial improvement of 53.14%.
+Naive Memcpy, Naive Reduce (MSSP), and Optimized Reduce (AddI32) show minimal or no change.
+Interestingly, Naive Reduce (AddI32) shows a slight performance decrease with coalesced access.
+Overall, coalesced memory access provides significant performance benefits, especially for more complex operations like Scan and SgmScan.
+
+
+
+TASK 2
+-----------------------------------------
+scanIncWarp with coalesced access (task2)
+
+[pvr448@hendrixfut03fl cuda]$ make run_pbb
+nvcc -O3 -o test_pbb pbb_main.cu
+./test_pbb 100003565 256
+Device name: NVIDIA A100-PCIE-40GB
+Number of hardware threads: 221184
+Max block size: 1024
+Shared memory size: 49152
+====
+Testing parallel basic blocks for input length: 100003565 and CUDA-block size: 256
+
+
+Naive Memcpy GPU Kernel runs in: 738 microsecs, GB/sec: 1084.05
+
+
+Testing Naive Reduce with Int32 Addition Operator:
+Reduce GPU Kernel runs in: 1239 microsecs, GB/sec: 322.85
+Reduce CPU Sequential runs in: 55429 microsecs, GB/sec: 7.22
+Reduce: VALID result!
+
+Testing Optimized Reduce with Int32 Addition Operator:
+Reduce GPU Kernel runs in: 390 microsecs, GB/sec: 1025.68
+Reduce CPU Sequential runs in: 55688 microsecs, GB/sec: 7.18
+Reduce: VALID result!
+
+Testing Naive Reduce with MSSP Operator:
+Reduce GPU Kernel runs in: 3612 microsecs, GB/sec: 110.75
+Reduce CPU Sequential runs in: 473894 microsecs, GB/sec: 0.84
+Reduce: VALID result!
+
+Testing Optimized Reduce with MSSP Operator:
+Reduce GPU Kernel runs in: 1050 microsecs, GB/sec: 380.97
+Reduce CPU Sequential runs in: 474711 microsecs, GB/sec: 0.84
+Reduce: VALID result!
+
+Scan Inclusive AddI32 GPU Kernel runs in: 1616 microsecs, GB/sec: 742.60
+Scan Inclusive AddI32 CPU Sequential runs in: 60981 microsecs, GB/sec: 13.12
+Scan Inclusive AddI32: VALID result!
+
+SgmScan Inclusive AddI32 GPU Kernel runs in: 1356 microsecs, GB/sec: 1032.49
+SgmScan Inclusive AddI32 CPU Sequential runs in: 202113 microsecs, GB/sec: 3.96
+SgmScan Inclusive AddI32: VALID result!
+
+
+-----------------------------------------
+scanIncWarp without memory coalesced
+
+[pvr448@hendrixfut03fl cuda]$ make run_pbb
+nvcc -O3 -o test_pbb pbb_main.cu
+./test_pbb 100003565 256
+Device name: NVIDIA A100-PCIE-40GB
+Number of hardware threads: 221184
+Max block size: 1024
+Shared memory size: 49152
+====
+Testing parallel basic blocks for input length: 100003565 and CUDA-block size: 256
+
+
+Naive Memcpy GPU Kernel runs in: 737 microsecs, GB/sec: 1085.52
+
+
+Testing Naive Reduce with Int32 Addition Operator:
+Reduce GPU Kernel runs in: 1288 microsecs, GB/sec: 310.57
+Reduce CPU Sequential runs in: 55666 microsecs, GB/sec: 7.19
+Reduce: VALID result!
+
+Testing Optimized Reduce with Int32 Addition Operator:
+Reduce GPU Kernel runs in: 407 microsecs, GB/sec: 982.84
+Reduce CPU Sequential runs in: 55498 microsecs, GB/sec: 7.21
+Reduce: VALID result!
+
+Testing Naive Reduce with MSSP Operator:
+Reduce GPU Kernel runs in: 3591 microsecs, GB/sec: 111.39
+Reduce CPU Sequential runs in: 757742 microsecs, GB/sec: 0.53
+Reduce: VALID result!
+
+Testing Optimized Reduce with MSSP Operator:
+Reduce GPU Kernel runs in: 1764 microsecs, GB/sec: 226.77
+Reduce CPU Sequential runs in: 583097 microsecs, GB/sec: 0.69
+Reduce: VALID result!
+
+Scan Inclusive AddI32 GPU Kernel runs in: 4573 microsecs, GB/sec: 262.42
+Scan Inclusive AddI32 CPU Sequential runs in: 60801 microsecs, GB/sec: 13.16
+Scan Inclusive AddI32: VALID result!
+
+SgmScan Inclusive AddI32 GPU Kernel runs in: 3057 microsecs, GB/sec: 457.98
+SgmScan Inclusive AddI32 CPU Sequential runs in: 201209 microsecs, GB/sec: 3.98
+SgmScan Inclusive AddI32: VALID result!
+
+[pvr448@hendrixfut03fl cuda]$ 
