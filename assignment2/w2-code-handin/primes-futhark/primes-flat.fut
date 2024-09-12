@@ -5,6 +5,44 @@
 
 -- output @ ref10000000.out
 
+type tuple = (i64, i64)
+
+-- from Helpercode LH2
+let mkFlagArray 't [m] 
+            (aoa_shp: [m]i64) (zero: t)   --aoa_shp=[0,3,1,0,4,2,0]
+            (aoa_val: [m]t  ) : []t   =   --aoa_val=[1,1,1,1,1,1,1]
+  let shp_rot = map (\i->if i==0 then 0   --shp_rot=[0,0,3,1,0,4,2]
+                         else aoa_shp[i-1]
+                    ) (iota m)
+  let shp_scn = scan (+) 0 shp_rot       --shp_scn=[0,0,3,4,4,8,10]
+  let aoa_len = if m == 0 then 0         --aoa_len= 10
+                else shp_scn[m-1]+aoa_shp[m-1]
+  let shp_ind = map2 (\shp ind ->        --shp_ind= 
+                       if shp==0 then -1 --  [-1,0,3,-1,4,8,-1]
+                       else ind          --scatter
+                     ) aoa_shp shp_scn   --   [0,0,0,0,0,0,0,0,0,0]
+  in scatter (replicate aoa_len zero)    --   [-1,0,3,-1,4,8,-1]
+             shp_ind aoa_val             --   [1,1,1,1,1,1,1]
+                                     -- res = [1,0,0,1,1,0,0,0,1,0] 
+
+
+-- from Helpercode LH2
+let segmented_scan [n] 't (op: t -> t -> t) (ne: t)
+                          (flags: [n]bool) (arr: [n]t) : [n]t =
+  let (_, res) = unzip <|
+    scan (\(x_flag,x) (y_flag,y) ->
+             let fl = x_flag || y_flag
+             let vl = if y_flag then y else op x y
+             in  (fl, vl)
+         ) (false, ne) (zip flags arr)
+  in  res
+
+-- taken from https://futhark-lang.org/examples/exclusive-scan.html
+let exscan [n] 't (f: t -> t -> t) (ne: t) (xs: [n]t) : [n]t =
+  map2 (\i x -> if i == 0 then ne else x)
+       (indices xs)
+       (rotate (-1) (scan f ne xs))
+
 let primesFlat (n : i64) : []i64 =
   let sq_primes   = [2i64, 3i64, 5i64, 7i64]
   let len  = 8i64
@@ -16,6 +54,9 @@ let primesFlat (n : i64) : []i64 =
 
       let mult_lens = map (\ p -> (len / p) - 1 ) sq_primes
       let flat_size = reduce (+) 0 mult_lens
+
+
+
 
       --------------------------------------------------------------
       -- The current iteration knows the primes <= 'len', 
@@ -37,8 +78,60 @@ let primesFlat (n : i64) : []i64 =
       -- Also note that `not_primes` has flat length equal to `flat_size`
       --  and the shape of `composite` is `mult_lens`. 
       
-      let not_primes = replicate flat_size 0
+    -- LECTURE SLIDES:
+    --let nested = map (\p ->
+      --let m = n ‘div‘ p in -- distribute map
+      --let mm1 = m - 1 in -- distribute map
+      --let iot = iota mm1 in -- F rule 4
+    --  let twom= map (+2) iot in -- F rule 2
+    --  let rp = replicate mm1 p in -- F rule 3
+    --  in map (\(j,p) -> j*p) (zip twom rp) -- F rule 2
+    --  ) sqrt_primes
 
+      --rule 1 map (scan op) becomes segmented_scan (op)
+      
+      let aoa_shp = replicate flat_size flat_size -- we want have a shape array [flat_size, flat_size, ...]
+      let aoa_val = replicate flat_size false
+      let flag_array = mkFlagArray aoa_shp false aoa_val :> [flat_size*flat_size]bool
+      let arr = replicate (flat_size*flat_size) 0i64 
+      let iots = segmented_scan (+) 0i64 flag_array arr
+      -- PART:  let twom = map (+2) iot
+      --we apply rule 2 that a map (map f) becomes map f on a flattened array
+      let twoms = map (+2) iots 
+
+
+      -- PART: let rp = replicate mm1 p -- F rule 3
+      -- we use rule 3 that states that map (replicate) can be 
+      -- flattened to a composition of scan and scatter
+      
+      let inds = exscan (+) 0 mult_lens
+      let size = (last inds) + (last mult_lens)
+      let flag = scatter (replicate size 0) inds mult_lens :> [flat_size*flat_size]i64
+
+      let bool_flag = map  (\ f -> if f != 0        
+              then true
+              else false
+      ) flag 
+      let vals = scatter (replicate size 0) inds sq_primes :> [flat_size*flat_size]i64
+      let rp_s = segmented_scan (+) 0i64 bool_flag vals
+
+
+      let cast_twoms = twoms :> [flat_size*flat_size]i64
+      let composite = map (\(j,p) -> j*p) (zip cast_twoms rp_s)  
+
+
+
+      --let composite = map (\mm1 ->
+        --let iot = scan (+) 0 replicate flat_size 0 --  apply rule 4
+        --let twom = map (+2) iot -- F rule 2
+        --let rp = replicate mm1 p -- F rule 3
+        --in map (\(j,p) -> j*p) (zip twom rp) -- F rule 2
+        --) mult_lens
+
+
+
+      let not_primes = reduce (++) [] composite
+      --let not_primes = replicate flat_size 0i8
       -- If not_primes is correctly computed, then the remaining
       -- code is correct and will do the job of computing the prime
       -- numbers up to n!
