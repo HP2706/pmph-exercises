@@ -1,6 +1,7 @@
 #ifndef SPMV_MUL_KERNELS
 #define SPMV_MUL_KERNELS
 
+
 __global__ void
 replicate0(int tot_size, char* flags_d) {
     uint32_t gid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -8,6 +9,7 @@ replicate0(int tot_size, char* flags_d) {
         flags_d[gid] = 0;
     }
 }
+
 
 
 /* 
@@ -36,17 +38,18 @@ let mkFlagArray 't [m]
 */
 
 __global__ void
-mkFlags(int mat_rows, int* mat_shp_sc_d, char* flags_d) {
+mkFlags(
+    int mat_rows, // number of rows 
+    int* mat_shp_sc_d, // shape of the sparse matrix 
+    char* flags_d // flags array
+) {
     uint32_t gid = blockIdx.x * blockDim.x + threadIdx.x;
     if (gid < mat_rows) {
-        int start = (gid == 0) ? 0 : mat_shp_sc_d[gid - 1];
-        int end = mat_shp_sc_d[gid];
-        
-        if (start < end) {
-            flags_d[start] = 1;  // Set flag for the start of each row
-        }
+        int shp_rot = (gid == 0) ? 0 : mat_shp_sc_d[gid-1];
+        flags_d[shp_rot] = 1;
     }
 }
+
 
 __global__ void
 mult_pairs(int* mat_inds, float* mat_vals, float* vct, int tot_size, float* tmp_pairs) {
@@ -57,11 +60,14 @@ mult_pairs(int* mat_inds, float* mat_vals, float* vct, int tot_size, float* tmp_
 }
 
 __global__ void
-select_last_in_sgm(int mat_rows, int* mat_shp_sc_d, float* tmp_scan, float* res_vct_d) {
-    uint32_t gid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (gid < mat_rows) {
-        res_vct_d[gid] = tmp_scan[mat_shp_sc_d[gid]];
-    }
+select_last_in_sgm(
+    int mat_rows, 
+    int* mat_shp_sc_d, 
+    float* tmp_scan, 
+    float* res_vct_d
+) {
+    // TODO: fill in your implementation here ...
 }
 
 #endif // SPMV_MUL_KERNELS
+
