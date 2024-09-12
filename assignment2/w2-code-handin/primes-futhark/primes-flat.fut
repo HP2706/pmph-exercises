@@ -88,49 +88,47 @@ let primesFlat (n : i64) : []i64 =
     --  in map (\(j,p) -> j*p) (zip twom rp) -- F rule 2
     --  ) sqrt_primes
 
-      --rule 1 map (scan op) becomes segmented_scan (op)
-      
-      let aoa_shp = replicate flat_size flat_size -- we want have a shape array [flat_size, flat_size, ...]
-      let aoa_val = replicate flat_size false
-      let flag_array = mkFlagArray aoa_shp false aoa_val :> [flat_size*flat_size]bool
-      let arr = replicate (flat_size*flat_size) 0i64 
-      let iots = segmented_scan (+) 0i64 flag_array arr
-      -- PART:  let twom = map (+2) iot
-      --we apply rule 2 that a map (map f) becomes map f on a flattened array
-      let twoms = map (+2) iots 
-
-
-      -- PART: let rp = replicate mm1 p -- F rule 3
-      -- we use rule 3 that states that map (replicate) can be 
-      -- flattened to a composition of scan and scatter
-      
-      let inds = exscan (+) 0 mult_lens
-      let size = (last inds) + (last mult_lens)
-      let flag = scatter (replicate size 0) inds mult_lens :> [flat_size*flat_size]i64
-
-      let bool_flag = map  (\ f -> if f != 0        
-              then true
-              else false
-      ) flag 
-      let vals = scatter (replicate size 0) inds sq_primes :> [flat_size*flat_size]i64
-      let rp_s = segmented_scan (+) 0i64 bool_flag vals
-
-
-      let cast_twoms = twoms :> [flat_size*flat_size]i64
-      let composite = map (\(j,p) -> j*p) (zip cast_twoms rp_s)  
-
-
-
+      -- the thing we are truing to flatten
       --let composite = map (\mm1 ->
         --let iot = scan (+) 0 replicate flat_size 0 --  apply rule 4
         --let twom = map (+2) iot -- F rule 2
         --let rp = replicate mm1 p -- F rule 3
         --in map (\(j,p) -> j*p) (zip twom rp) -- F rule 2
-        --) mult_lens
+      --) mult_lens
+
+      -- PART: let iot = scan (+) 0 replicate flat_size 0 
+      --rule 4 map (scan op) becomes segmented_scan (op)
+      
+      let aoa_shp = replicate flat_size 1 -- we want have a shape array [flat_size, flat_size, ...]
+      let aoa_val = replicate flat_size false
+      let flag_array = mkFlagArray aoa_shp false aoa_val :> [flat_size]bool
+      let arr = replicate flat_size 1i64 :> [flat_size]i64
+      let iots = segmented_scan (+) 0i64 flag_array arr 
 
 
+      -- PART:  let twom = map (+2) iot
+      --we apply rule 2 that a map (map f) becomes map f on a flattened array
+      let twoms = map (+2) iots 
 
-      let not_primes = reduce (++) [] composite
+      -- PART: let rp = replicate mm1 p -- F rule 3
+      -- we use rule 3 that states that map (replicate) can be 
+      -- flattened to a composition of scan and scatter      
+      let inds = scan (+) 0 mult_lens
+      let size = (last inds) + (last mult_lens)
+      let flag = scatter (replicate size 0) inds mult_lens 
+
+      let bool_flag = map  (\ f -> if f != 0        
+              then true
+              else false
+      ) flag 
+      let vals = scatter (replicate size 0) inds sq_primes 
+      let rp_s = segmented_scan (+) 0i64 bool_flag vals :> [flat_size]i64
+
+
+      let cast_twoms = twoms 
+      let not_primes = map (\(j,p) -> j*p) (zip cast_twoms rp_s)  
+
+
       --let not_primes = replicate flat_size 0i8
       -- If not_primes is correctly computed, then the remaining
       -- code is correct and will do the job of computing the prime
