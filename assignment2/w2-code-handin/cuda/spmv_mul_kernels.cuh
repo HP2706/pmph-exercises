@@ -40,13 +40,19 @@ let mkFlagArray 't [m]
 __global__ void
 mkFlags(
     int mat_rows, // number of rows 
-    int* mat_shp_sc_d, // shape of the sparse matrix 
+    int* mat_shp_sc_d, // the scanned shape array
     char* flags_d // flags array
 ) {
     uint32_t gid = blockIdx.x * blockDim.x + threadIdx.x;
     if (gid < mat_rows) {
-        int shp_rot = (gid == 0) ? 0 : mat_shp_sc_d[gid-1];
-        flags_d[shp_rot] = 1;
+        int start_idx = 0;
+        if (gid != 0) {
+            start_idx = mat_shp_sc_d[gid - 1]; // we start at the end of the previous segment
+        }
+        int end_idx = mat_shp_sc_d[gid] - 1; // we end at the end of the current segment
+
+        flags_d[start_idx] = 1;
+        flags_d[end_idx] = 1;
     }
 }
 
@@ -59,14 +65,30 @@ mult_pairs(int* mat_inds, float* mat_vals, float* vct, int tot_size, float* tmp_
     }
 }
 
+
+/* 
+let last_indices = scan (+) 0 mat_shp
+  
+-- Extract the last element of each segmented sum
+let row_sums = map (
+\i -> if i == 0 then 
+    scan_res[i]
+else 
+    scan_res[i - 1]
+) last_indices
+*/
+
 __global__ void
 select_last_in_sgm(
     int mat_rows, 
-    int* mat_shp_sc_d, 
-    float* tmp_scan, 
-    float* res_vct_d
+    int* mat_shp_sc_d, // the shape array segmented scan
+    float* tmp_scan, // the scan
+    float* res_vct_d // store the result
 ) {
-    // TODO: fill in your implementation here ...
+    uint32_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (gid < mat_rows) {
+        res_vct_d[gid] = tmp_scan[mat_shp_sc_d[gid] - 1]; // the read from temp_scan the last element of each segment
+    }
 }
 
 #endif // SPMV_MUL_KERNELS
