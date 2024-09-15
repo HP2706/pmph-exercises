@@ -1,41 +1,49 @@
 #ifndef SPMV_MUL_KERNELS
 #define SPMV_MUL_KERNELS
+#include <typeinfo>
+#include <cstdio>
 
 
-__global__ void
-replicate0(int tot_size, char* flags_d) {
+// prints the array on cpu for debugging before copying back to host
+template <typename T>
+void print_array(
+    T* arr, 
+    int size, 
+    const char* name
+) {
+    T* h_arr = (T*)malloc(size * sizeof(T));
+    CUDASSERT(cudaMemcpy(h_arr, arr, size * sizeof(T), cudaMemcpyDeviceToHost));
+    printf("%s: ", name);
+    for (int i = 0; i < size; i++) {
+        if (std::is_same<T, float>::value || std::is_same<T, double>::value) {
+            printf("%f ", h_arr[i]);
+        } else if (std::is_same<T, int>::value) {
+            printf("%d ", h_arr[i]);
+        } else if (std::is_same<T, char>::value) {
+            printf("%d ", (int)h_arr[i]);
+        } else if (std::is_same<T, bool>::value) {
+            printf("%d ", (int)h_arr[i]);
+        } else if (std::is_same<T, char>::value) {
+            printf("%d ", (char)h_arr[i]);
+        } else {
+            printf("%d ", (int)h_arr[i]);
+        }
+
+
+    }
+    CUDASSERT(cudaMemcpy(arr, h_arr, size * sizeof(T), cudaMemcpyHostToDevice));
+    printf("\n");
+    free(h_arr);
+}
+
+
+
+__global__ void replicate0(int tot_size, char* flags_d) {
     uint32_t gid = blockIdx.x * blockDim.x + threadIdx.x;
     if (gid < tot_size) {
         flags_d[gid] = 0;
     }
 }
-
-
-
-/* 
--- mkFlagArray: inspired by lecture notes page 48
-let mkFlagArray 't [m]  
-  (aoa_shp: [m]i64) 
-  (zero: t) 
-  (aoa_val: [m]t) : []t = 
-
-  let shp_rot = map (\i -> 
-    if i == 0 then 0
-    else aoa_shp[i-1]
-  ) (iota m)
-  
-  let shp_scn = scan (+) 0 shp_rot
-  let aoa_len = if m == 0 then 0 
-                else shp_scn[m-1] + aoa_shp[m-1]
-
-  let shp_ind = map2 (\shp ind -> 
-    if shp == 0 then -1
-    else ind
-  ) aoa_shp shp_scn
-
-  in scatter (replicate aoa_len zero) shp_ind aoa_val
-
-*/
 
 __global__ void
 mkFlags(
@@ -45,14 +53,8 @@ mkFlags(
 ) {
     uint32_t gid = blockIdx.x * blockDim.x + threadIdx.x;
     if (gid < mat_rows) {
-        int start_idx = 0;
-        if (gid != 0) {
-            start_idx = mat_shp_sc_d[gid - 1]; // we start at the end of the previous segment
-        }
-        int end_idx = mat_shp_sc_d[gid] - 1; // we end at the end of the current segment
-
+        int start_idx = mat_shp_sc_d[gid]; // we start at the end of the previous segment
         flags_d[start_idx] = 1;
-        flags_d[end_idx] = 1;
     }
 }
 
@@ -64,19 +66,6 @@ mult_pairs(int* mat_inds, float* mat_vals, float* vct, int tot_size, float* tmp_
         tmp_pairs[gid] = mat_vals[gid] * vct[mat_inds[gid]];
     }
 }
-
-
-/* 
-let last_indices = scan (+) 0 mat_shp
-  
--- Extract the last element of each segmented sum
-let row_sums = map (
-\i -> if i == 0 then 
-    scan_res[i]
-else 
-    scan_res[i - 1]
-) last_indices
-*/
 
 __global__ void
 select_last_in_sgm(
