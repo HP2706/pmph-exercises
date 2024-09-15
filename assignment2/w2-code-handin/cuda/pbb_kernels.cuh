@@ -212,31 +212,29 @@ scanIncWarp(
 template<class OP>
 __device__ inline typename OP::RedElTp
 scanIncBlock(volatile typename OP::RedElTp* ptr, const unsigned int idx) {
-    const unsigned int lane   = idx & (WARP-1);
-    const unsigned int warpid = idx >> lgWARP;
+    const unsigned int lane    = idx & (WARP - 1);
+    const unsigned int warpid  = idx >> lgWARP;
+    const unsigned int n_warps = (blockDim.x + WARP - 1) >> lgWARP; // Total number of warps
 
-    // 1. perform scan at warp level. `scanIncWarp` computes its result in-place
-    //    and also returns the per-thread result.
-    typename OP::RedElTp res = scanIncWarp<OP>(ptr,idx);
+    // 1. Perform scan at warp level.
+    typename OP::RedElTp res = scanIncWarp<OP>(ptr, idx);
     __syncthreads();
 
-    // 2. place the end-of-warp results in
-    //   the first warp. This works because
-    //   warp size = 32, and
-    //   max block size = 32^2 = 1024
-    if (lane == (WARP-1)) { 
-        // likely here 
-        ptr[warpid] = OP::remVolatile(ptr[idx]); 
+    // 2. Place the end-of-warp results into a separate location in shared memory.
+    if (lane == (WARP - 1)) {
+        ptr[blockDim.x + warpid] = OP::remVolatile(ptr[idx]);
     }
     __syncthreads();
 
-    // 3. scan again the first warp.
-    if (warpid == 0) scanIncWarp<OP>(ptr, idx);
+    // 3. Let the first warp scan the per-warp sums.
+    if (warpid == 0 && idx < n_warps) {
+        scanIncWarp<OP>(ptr + blockDim.x, idx);
+    }
     __syncthreads();
 
-    // 4. accumulate results from previous step.
+    // 4. Accumulate results from the previous step.
     if (warpid > 0) {
-        res = OP::apply(ptr[warpid-1], res);
+        res = OP::apply(ptr[blockDim.x + warpid - 1], res);
     }
 
     return res;
