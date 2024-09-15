@@ -2,9 +2,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
-
 #include "host_skel.cuh"
 #include "spmv_mul_kernels.cuh"
+
+
 
 
 /**
@@ -88,8 +89,10 @@ int SparseMatVctMult(int block_size, int mat_rows, int vct_size) {
 
     float *vct, *mat_vals, *vct_res1, *vct_res2;
     int   *flags, *mat_inds;
+    char *flags_h;
     vct       = (float*)malloc(vct_size*sizeof(float));
     flags     = (int  *)malloc(tot_size*sizeof(int  ));
+    flags_h   = (char  *)malloc(tot_size*sizeof(char));
     mat_inds  = (int  *)malloc(tot_size*sizeof(int  ));
     mat_vals  = (float*)malloc(tot_size*sizeof(float));
 
@@ -110,6 +113,10 @@ int SparseMatVctMult(int block_size, int mat_rows, int vct_size) {
         elapsed = (t_diff.tv_sec*1e6+t_diff.tv_usec) / RUNS_CPU;
         printf("CPU Sparse Matrix-Vector Multiplication runs in: %lu microsecs\n", elapsed);
     }
+    /* 
+    for (int i = 0; i < tot_size; i++) {
+        printf("flags[%d]: %d\n", i, flags[i]);
+    } */
 
     { // GPU execution
         int   *mat_inds_d, *mat_shp_d, *mat_shp_sc_d, *d_tmp_int;
@@ -166,7 +173,9 @@ int SparseMatVctMult(int block_size, int mat_rows, int vct_size) {
         { // dry run to manifest the allocations in memory
             scanInc< Add<int> > ( block_size, mat_rows, mat_shp_sc_d, mat_shp_d, d_tmp_int );
             replicate0<<< num_blocks, block_size >>> ( tot_size, flags_d );
+            //print_array<int>(mat_shp_sc_d, mat_rows, "mat_shp_sc_d");
             mkFlags<<< num_blocks_shp, block_size >>> ( mat_rows, mat_shp_sc_d, flags_d );
+            //print_array<char>(flags_d, tot_size, "flags_d");
             mult_pairs<<< num_blocks, block_size >>>(mat_inds_d, mat_vals_d, vct_d, tot_size, tmp_pairs);
             sgmScanInc< Add<float> > ( block_size, tot_size, tmp_scan, flags_d, tmp_pairs, d_tmp_float, d_tmp_flag );
             select_last_in_sgm<<< num_blocks_shp, block_size >>>(mat_rows, mat_shp_sc_d, tmp_scan, res_vct_d);
@@ -218,16 +227,26 @@ int SparseMatVctMult(int block_size, int mat_rows, int vct_size) {
                         cudaMemcpyDeviceToHost));
         }
 
+        cudaMemcpy(flags_h, flags_d, tot_size*sizeof(char), cudaMemcpyDeviceToHost);
+
         cudaFree(mat_shp_d);  cudaFree(mat_shp_sc_d);
         cudaFree(flags_d);    cudaFree(mat_inds_d);  cudaFree(vct_d);
         cudaFree(mat_vals_d); cudaFree(res_vct_d);   cudaFree(tmp_pairs);
         cudaFree(tmp_scan);   cudaFree(tmp_inds);
         cudaFree(d_tmp_int);  cudaFree(d_tmp_float); cudaFree(d_tmp_flag);
-        CUDACHECK(cudaPeekAtLastError());
+        CUDASSERT(cudaPeekAtLastError());
     }
 
     {// validation
         bool valid = true;
+        /* for (int i = 0; i < tot_size; i++) {
+            if (flags[i] != flags_h[i]) {
+                printf("ERROR at flags index %d (cpu,gpu): (%d, %d)\n", i, flags[i], flags_h[i]);
+                valid = false;
+                break;
+            }
+        } */
+
         for(int i=0; i<mat_rows; i++) {
             float res1 = fabs(vct_res1[i]);
             float res2 = fabs(vct_res2[i]);
