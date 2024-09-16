@@ -1,4 +1,5 @@
 \documentclass{article}
+\usepackage{multirow}
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{listings}
@@ -42,22 +43,56 @@
 
 \section{Task 1}
 
+In your report:
+
+\begin{itemize}
+  \item Please state whether your implementation validates on both datasets.
+  \item Present the code that you have added and briefly explain it, i.e., its correspondence to the flattening rules.
+  \item Report the runtimes of all four code versions for the large dataset and try to briefly explain them, i.e., do they match what you would expect from their work-depth complexity?
+\end{itemize}
+
 \section{Task 2}
 
+Please write in your report:
 
 
-your one-line replacement;
-uint32_t loc_ind = i * blockDim.x + threadIdx.x;
+  we do the following replacement:
+  \begin{lstlisting}[language=cuda]
+    uint32_t loc_ind = i * blockDim.x + threadIdx.x;
+  \end{lstlisting}
 
-briefly explain why your replacement ensures coalesced access to global memory;
+  With loc\_ind = i * blockDim.x + threadIdx.x, consecutive threads within a warp (which have consecutive threadIdx.x values) will access consecutive memory locations.
+  So the memory access pattern happens with a stride of 1.
 
-explain to what extent your one-line replacement has affected the performance, i.e., which tests and by what factor.
+  .. Explain to what extent your one-line replacement has affected the performance, i.e., which tests and by what factor.
+  
+  from the test results we see the following performance improvements:
 
+  \begin{table}[h]
+    \centering
+    \begin{tabular}{|l|r|r|r|}
+    \hline
+    \textbf{Operation} & \textbf{Non-Coalesced (GB/s)} & \textbf{Coalesced (GB/s)} & \textbf{Improvement} \\
+    \hline
+    Naive Reduce (AddI32) & 323.90 & 309.13 & -4.56\% \\
+    Optimized Reduce (AddI32) & 1020.44 & 1023.05 & +0.26\% \\
+    Naive Reduce (MSSP) & 110.65 & 110.68 & +0.03\% \\
+    Optimized Reduce (MSSP) & 180.27 & 276.06 & +53.14\% \\
+    Scan Inclusive (AddI32) & 287.85 & 643.80 & +123.66\% \\
+    SgmScan Inclusive (AddI32) & 457.53 & 1032.49 & +125.67\% \\
+    \hline
+    \end{tabular}
+    \caption{Performance impact of coalesced memory access (Task 2)}
+    \label{tab:task2_perf}
+  \end{table}
 
+  we note that the scan computations were most affected by the change.
 
 \section{Task 3}
 
+Solution:
 
+\begin{lstlisting}[language=cuda]
 template<class OP>
 __device__ inline typename OP::RedElTp
 scanIncBlock(volatile typename OP::RedElTp* ptr, const unsigned int idx) {
@@ -88,8 +123,171 @@ scanIncBlock(volatile typename OP::RedElTp* ptr, const unsigned int idx) {
 
     return res;
 }
+\end{lstlisting}
+
+Explain the performance impact of your implementation: which tests were affected and by what factor. Does the impact become higher for smaller array lengths?
+\begin{table}[h]
+  \centering
+  \begin{tabular}{|l|r|r|r|}
+  \hline
+  \multirow{2}{*}{GPU Kernel} & \multicolumn{2}{c|}{GB/sec} & \multirow{2}{*}{Improvement} \\
+  \cline{2-3}
+   & Unoptimized & Optimized & \\
+  \hline
+  Reduce (Int32 Addition) & 325.74 & 304.42 & -6.54\% \\
+  \hline
+  Optimized Reduce (Int32 Addition) & 990.13 & 1033.63 & +4.39\% \\
+  \hline
+  Reduce (MSSP) & 107.70 & 108.70 & +0.93\% \\
+  \hline
+  Optimized Reduce (MSSP) & 110.72 & 183.83 & +66.03\% \\
+  \hline
+  Scan Inclusive AddI32 & 540.32 & 798.43 & +47.77\% \\
+  \hline
+  SgmScan Inclusive AddI32 & 837.85 & 837.35 & -0.06\% \\
+  \hline
+  \end{tabular}
+  \caption{Comparison of Unoptimized and Optimized GPU Kernel Implementations}
+  \label{tab:gpu-kernel-comparison}
+\end{table}
+
+
+we compare the two kernels for various array sizes:
+
+\begin{table}[h]
+  \centering
+  \small
+  \begin{tabular}{|l|r|r|r|r|r|r|r|r|}
+  \hline
+  \multirow{2}{*}{\textbf{Operation}} & \multicolumn{2}{c|}{\textbf{13,565}} & \multicolumn{2}{c|}{\textbf{103,565}} & \multicolumn{2}{c|}{\textbf{1,003,565}} & \multicolumn{2}{c|}{\textbf{10,003,565}} \\
+  \cline{2-9}
+   & \textbf{GB/s} & \textbf{\% Diff} & \textbf{GB/s} & \textbf{\% Diff} & \textbf{GB/s} & \textbf{\% Diff} & \textbf{GB/s} & \textbf{\% Diff} \\
+  \hline
+  Naive Reduce AddI32 (Unopt) & 0.94 & \multirow{2}{*}{-8.5\%} & 5.92 & \multirow{2}{*}{-9.1\%} & 40.14 & \multirow{2}{*}{+3.1\%} & 165.35 & \multirow{2}{*}{+9.0\%} \\
+  Naive Reduce AddI32 (Opt) & 0.86 & & 5.38 & & 41.38 & & 180.24 & \\
+  \hline
+  Opt Reduce AddI32 (Unopt) & 3.88 & \multirow{2}{*}{+27.1\%} & 27.62 & \multirow{2}{*}{+36.4\%} & 160.57 & \multirow{2}{*}{+78.4\%} & 625.22 & \multirow{2}{*}{+25.5\%} \\
+  Opt Reduce AddI32 (Opt) & 4.93 & & 37.66 & & 286.73 & & 784.59 & \\
+  \hline
+  Naive Reduce MSSP (Unopt) & 0.92 & \multirow{2}{*}{-23.9\%} & 4.87 & \multirow{2}{*}{-15.8\%} & 25.25 & \multirow{2}{*}{+1.9\%} & 57.82 & \multirow{2}{*}{+8.3\%} \\
+  Naive Reduce MSSP (Opt) & 0.70 & & 4.10 & & 25.73 & & 62.62 & \\
+  \hline
+  Opt Reduce MSSP (Unopt) & 1.55 & \multirow{2}{*}{+29.7\%} & 10.90 & \multirow{2}{*}{+40.7\%} & 51.46 & \multirow{2}{*}{+62.5\%} & 79.08 & \multirow{2}{*}{+65.9\%} \\
+  Opt Reduce MSSP (Opt) & 2.01 & & 15.34 & & 83.63 & & 131.19 & \\
+  \hline
+  Scan Inc AddI32 (Unopt) & 6.03 & \multirow{2}{*}{+17.4\%} & 42.85 & \multirow{2}{*}{+26.1\%} & 236.13 & \multirow{2}{*}{+50.0\%} & 412.52 & \multirow{2}{*}{+55.6\%} \\
+  Scan Inc AddI32 (Opt) & 7.08 & & 54.03 & & 354.20 & & 641.94 & \\
+  \hline
+  SgmScan Inc AddI32 (Unopt) & 8.26 & \multirow{2}{*}{-20.7\%} & 60.41 & \multirow{2}{*}{-17.2\%} & 226.61 & \multirow{2}{*}{+1.6\%} & 434.94 & \multirow{2}{*}{-0.3\%} \\
+  SgmScan Inc AddI32 (Opt) & 6.55 & & 50.00 & & 230.33 & & 433.59 & \\
+  \hline
+  \end{tabular}
+  \caption{Performance comparison (GB/s) between optimized and unoptimized versions for different array sizes}
+  \label{tab:performance_comparison}
+  \end{table}
+
+  we observe that the performance increase is most prominent when the array size is large. and the relative performance gain decreases as the array size decreases.
 
 \section{Task 4}
 
+Please explain in the report:
+
+\begin{itemize}
+  \item The nature of the bug.
+  
+  the nature of the bug is a race condition that occurs between thread number 1024 and 
+  this is because within this code block 
+  we are both reading and writing to ptr.
+  
+  \begin{lstlisting}[language=cuda]
+    if (lane == (WARP-1)) { 
+        ptr[warpid] = OP::remVolatile(ptr[idx]); 
+    }
+  \end{lstlisting}
+
+  the bug appears only w
+  \item How you fixed it.
+  
+  \begin{lstlisting}[language=cuda]
+    if (lane == (WARP - 1)) {
+        // we offset the index by blockDim.x to avoid race conditions
+        ptr[blockDim.x + warpid] = OP::remVolatile(ptr[idx]);
+    }
+  \end{lstlisting}
+
+\end{itemize}
+
+\textit{When compiling/running with block size 1024, remember to set the value of...}
+
+\section{Task 5}
+
+\begin{itemize}
+  \item Implement the four kernels of file \texttt{spmv\_mul\_kernels.cuh} and two lines in file \texttt{spmv\_mul\_main.cu} (at lines 155-156).
+  \item Add your implementation in the report (it is short enough) and report speedup/slowdown vs sequential CPU execution.
+  
+  code for determining number of blocks:
+  
+  \begin{lstlisting}[language=cuda]
+    unsigned int num_blocks     = (tot_size + block_size - 1) / block_size;
+    unsigned int num_blocks_shp = (mat_rows + block_size - 1) / block_size;  
+  \end{lstlisting}
+
+  \begin{lstlisting}[language=cuda]
+    #ifndef SPMV_MUL_KERNELS
+    #define SPMV_MUL_KERNELS
+
+    __global__ void replicate0(int tot_size, char* flags_d) {
+        uint32_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+        if (gid < tot_size) {
+            flags_d[gid] = 0;
+        }
+    }
+
+    __global__ void
+    mkFlags(
+        int mat_rows, // number of rows 
+        int* mat_shp_sc_d, // the scanned shape array
+        char* flags_d // flags array
+    ) {
+        uint32_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+        if (gid < mat_rows) {
+            int start_idx = (gid == 0) ? 0 : mat_shp_sc_d[gid - 1];
+            flags_d[start_idx] = 1;
+        }
+    }
+
+    __global__ void
+    mult_pairs(int* mat_inds, float* mat_vals, float* vct, int tot_size, float* tmp_pairs) {
+        uint32_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+        if (gid < tot_size) {
+            tmp_pairs[gid] = mat_vals[gid] * vct[mat_inds[gid]];
+        }
+    }
+
+    __global__ void
+    select_last_in_sgm(
+        int mat_rows, 
+        int* mat_shp_sc_d, // the shape array segmented scan
+        float* tmp_scan, // the scan
+        float* res_vct_d // store the result
+    ) {
+        uint32_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+        if (gid < mat_rows) {
+            res_vct_d[gid] = tmp_scan[mat_shp_sc_d[gid] - 1]; // the read from temp_scan the last element of each segment
+        }
+    }
+
+    #endif // SPMV_MUL_KERNELS
+
+
+  \end{lstlisting}
+
+  On an nvidia a100 pcie 40gb, the following results were obtained:
+  Testing Sparse-MatVec Mul with num-rows-matrix: 11033, vct-size: 2076, block size: 256
+
+  CPU Sparse Matrix-Vector Multiplication runs in: 19584 microsecs
+  GPU Sparse Matrix-Vector Multiplication runs in: 447 microsecs
+  speedup: 19584/447 = 43.86
+\end{itemize}
 
 \end{document}

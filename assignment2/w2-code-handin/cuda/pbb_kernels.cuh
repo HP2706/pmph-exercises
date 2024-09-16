@@ -760,14 +760,15 @@ sgmScanIncWarp(volatile typename OP::RedElTp* ptr, volatile F* flg, const unsign
     typedef ValFlg<typename OP::RedElTp> FVTup;
     const unsigned int lane = idx & (WARP-1);
 
-    // no synchronization needed inside a WARP, i.e., SIMD execution
     #pragma unroll
     for(uint32_t i=0; i<lgWARP; i++) {
         const uint32_t p = (1<<i);
         if( lane >= p ) {
-            if(flg[idx] == 0) { ptr[idx] = OP::apply(ptr[idx-p], ptr[idx]); }
+            if(flg[idx] == 0) { 
+                ptr[idx] = OP::apply(ptr[idx-p], ptr[idx]); 
+            }
             flg[idx] = flg[idx-p] | flg[idx];
-        } // __syncwarp();
+        } 
     }
 
     F f = flg[idx];

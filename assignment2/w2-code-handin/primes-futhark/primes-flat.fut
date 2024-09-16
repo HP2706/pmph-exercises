@@ -54,10 +54,6 @@ let primesFlat (n : i64) : []i64 =
 
       let mult_lens = map (\ p -> (len / p) - 1 ) sq_primes
       let flat_size = reduce (+) 0 mult_lens
-
-
-
-
       --------------------------------------------------------------
       -- The current iteration knows the primes <= 'len', 
       --  based on which it will compute the primes <= 'len*len'
@@ -88,23 +84,11 @@ let primesFlat (n : i64) : []i64 =
     --  in map (\(j,p) -> j*p) (zip twom rp) -- F rule 2
     --  ) sqrt_primes
 
-      -- the thing we are truing to flatten
-      --let composite = map (\mm1 ->
-        --let iot = scan (+) 0 replicate flat_size 0 --  apply rule 4
-        --let twom = map (+2) iot -- F rule 2
-        --let rp = replicate mm1 p -- F rule 3
-        --in map (\(j,p) -> j*p) (zip twom rp) -- F rule 2
-      --) mult_lens
-
-      -- PART: let iot = scan (+) 0 replicate flat_size 0 
-      --rule 4 map (scan op) becomes segmented_scan (op)
-      
       let aoa_shp = replicate flat_size 1 -- we want have a shape array [flat_size, flat_size, ...]
       let aoa_val = replicate flat_size false
       let flag_array = mkFlagArray aoa_shp false aoa_val :> [flat_size]bool
-      let arr = replicate flat_size 1i64 :> [flat_size]i64
+      let arr = replicate flat_size 1i64 
       let iots = segmented_scan (+) 0i64 flag_array arr 
-
 
       -- PART:  let twom = map (+2) iot
       --we apply rule 2 that a map (map f) becomes map f on a flattened array
@@ -122,8 +106,7 @@ let primesFlat (n : i64) : []i64 =
               else false
       ) flag 
       let vals = scatter (replicate size 0) inds sq_primes 
-      let rp_s = segmented_scan (+) 0i64 bool_flag vals :> [size]i64
-
+      let rp_s = segmented_scan (+) 0i64 bool_flag vals 
 
       let cast_twoms = twoms 
       let not_primes = map (\(j,p) -> j*p) (zip cast_twoms rp_s)  
