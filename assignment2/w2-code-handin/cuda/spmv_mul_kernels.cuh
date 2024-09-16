@@ -1,40 +1,5 @@
 #ifndef SPMV_MUL_KERNELS
 #define SPMV_MUL_KERNELS
-#include <typeinfo>
-#include <cstdio>
-
-
-// prints the array on cpu for debugging before copying back to host
-template <typename T>
-void print_array(
-    T* arr, 
-    int size, 
-    const char* name
-) {
-    T* h_arr = (T*)malloc(size * sizeof(T));
-    CUDASSERT(cudaMemcpy(h_arr, arr, size * sizeof(T), cudaMemcpyDeviceToHost));
-    printf("%s: ", name);
-    for (int i = 0; i < size; i++) {
-        if (std::is_same<T, float>::value || std::is_same<T, double>::value) {
-            printf("%f ", h_arr[i]);
-        } else if (std::is_same<T, int>::value) {
-            printf("%d ", h_arr[i]);
-        } else if (std::is_same<T, char>::value) {
-            printf("%d ", (int)h_arr[i]);
-        } else if (std::is_same<T, bool>::value) {
-            printf("%d ", (int)h_arr[i]);
-        } else if (std::is_same<T, char>::value) {
-            printf("%d ", (char)h_arr[i]);
-        } else {
-            printf("%d ", (int)h_arr[i]);
-        }
-
-
-    }
-    CUDASSERT(cudaMemcpy(arr, h_arr, size * sizeof(T), cudaMemcpyHostToDevice));
-    printf("\n");
-    free(h_arr);
-}
 
 __global__ void replicate0(int tot_size, char* flags_d) {
     uint32_t gid = blockIdx.x * blockDim.x + threadIdx.x;

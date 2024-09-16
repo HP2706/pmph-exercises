@@ -175,9 +175,7 @@ int SparseMatVctMult(int block_size, int mat_rows, int vct_size) {
         { // dry run to manifest the allocations in memory
             scanInc< Add<int> > ( block_size, mat_rows, mat_shp_sc_d, mat_shp_d, d_tmp_int );
             replicate0<<< num_blocks, block_size >>> ( tot_size, flags_d );
-            //print_array<int>(mat_shp_sc_d, mat_rows, "mat_shp_sc_d");
             mkFlags<<< num_blocks_shp, block_size >>> ( mat_rows, mat_shp_sc_d, flags_d );
-            //print_array<char>(flags_d, tot_size, "flags_d");
             mult_pairs<<< num_blocks, block_size >>>(mat_inds_d, mat_vals_d, vct_d, tot_size, tmp_pairs);
             sgmScanInc< Add<float> > ( block_size, tot_size, tmp_scan, flags_d, tmp_pairs, d_tmp_float, d_tmp_flag );
             select_last_in_sgm<<< num_blocks_shp, block_size >>>(mat_rows, mat_shp_sc_d, tmp_scan, res_vct_d);
@@ -241,14 +239,7 @@ int SparseMatVctMult(int block_size, int mat_rows, int vct_size) {
 
     {// validation
         bool valid = true;
-        /* for (int i = 0; i < tot_size; i++) {
-            if (flags[i] != flags_h[i]) {
-                printf("ERROR at flags index %d (cpu,gpu): (%d, %d)\n", i, flags[i], flags_h[i]);
-                valid = false;
-                break;
-            }
-        } */
-
+        
         for(int i=0; i<mat_rows; i++) {
             float res1 = fabs(vct_res1[i]);
             float res2 = fabs(vct_res2[i]);

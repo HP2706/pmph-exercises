@@ -184,6 +184,15 @@ scanIncWarp(
 ) {
     const unsigned int lane = idx & (WARP-1);
     
+    /* 
+    if(lane==0) {
+        #pragma unroll
+        for(int i=1; i<WARP; i++) {
+            ptr[idx+i] = OP::apply(ptr[idx+i-1], ptr[idx+i]);
+        }
+    }
+    */
+
     #pragma unroll
     for (int d = 0; d < 5; d++) {
         int h = 1 << d; // 2^d double the stride
@@ -221,8 +230,15 @@ scanIncBlock(volatile typename OP::RedElTp* ptr, const unsigned int idx) {
     __syncthreads();
 
     // 2. Place the end-of-warp results into a separate location in shared memory.
-    // prev: if (lane == (WARP-1)) { ptr[warpid] = OP::remVolatile(ptr[idx]); }
+
     __syncthreads();
+    /* 
+    original code:
+    if (lane == (WARP-1)) { 
+        ptr[warpid] = OP::remVolatile(ptr[idx]); 
+    } */
+    
+    // 2. Place the end-of-warp results into a separate location in shared memory.
     if (lane == (WARP - 1)) {
         ptr[blockDim.x + warpid] = OP::remVolatile(ptr[idx]);
     }
