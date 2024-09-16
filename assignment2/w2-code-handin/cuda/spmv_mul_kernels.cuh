@@ -36,8 +36,6 @@ void print_array(
     free(h_arr);
 }
 
-
-
 __global__ void replicate0(int tot_size, char* flags_d) {
     uint32_t gid = blockIdx.x * blockDim.x + threadIdx.x;
     if (gid < tot_size) {
@@ -55,12 +53,6 @@ mkFlags(
     if (gid < mat_rows) {
         int start_idx = (gid == 0) ? 0 : mat_shp_sc_d[gid - 1];
         flags_d[start_idx] = 1;
-        
-        //int end_idx = mat_shp_sc_d[gid];
-        //flags_d[end_idx - 1] = 1;
-        /* for (int i = start_idx; i < end_idx; i++) {
-            flags_d[i] = (i == start_idx) ? 1 : 0;
-        } */
     }
 }
 

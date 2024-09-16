@@ -122,7 +122,7 @@ let primesFlat (n : i64) : []i64 =
               else false
       ) flag 
       let vals = scatter (replicate size 0) inds sq_primes 
-      let rp_s = segmented_scan (+) 0i64 bool_flag vals :> [flat_size]i64
+      let rp_s = segmented_scan (+) 0i64 bool_flag vals :> [size]i64
 
 
       let cast_twoms = twoms 
