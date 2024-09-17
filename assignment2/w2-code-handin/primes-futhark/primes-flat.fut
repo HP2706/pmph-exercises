@@ -43,6 +43,22 @@ let exscan [n] 't (f: t -> t -> t) (ne: t) (xs: [n]t) : [n]t =
        (indices xs)
        (rotate (-1) (scan f ne xs))
 
+let flattened_iota [n] (mult_lens: [n]i64) : []i64 =
+    let inds = exscan (+) 0 mult_lens -- [0,1,4]
+    let size = (last inds) + (last mult_lens) -- 4 + 2 = 6
+    let flag = scatter (replicate size 0) inds mult_lens
+    let tmp = replicate size 1i64
+    let bool_flags = map (\x -> x > 0i64) flag
+    in segmented_scan (+) 0i64 bool_flags tmp
+
+let flattened_replicate [n] (counts : [n]i64, values : [n]i64) : []i64 =
+  let inds = exscan (+) 0 counts -- [0,1,4]
+  let size = (last inds) + (last counts) -- 4 + 2 = 6
+  let flag = scatter (replicate size 0) inds counts -- [1, 3, 0, 0, 2, 0]
+  let vals = scatter (replicate size 0) inds values -- [7, 8, 0, 0, 9, 0]
+  let bool_flags = map (\x -> x > 0i64) flag
+  in segmented_scan (+) 0i64 bool_flags vals
+
 let primesFlat (n : i64) : []i64 =
   let sq_primes   = [2i64, 3i64, 5i64, 7i64]
   let len  = 8i64
@@ -52,7 +68,7 @@ let primesFlat (n : i64) : []i64 =
       -- but without running out of i64 bounds 
       let len = if n / len < len then n else len*len
 
-      let mult_lens = map (\ p -> (len / p) - 1 ) sq_primes
+      let mult_lens = map (\ p -> (len / p) - 1 ) sq_primes 
       let flat_size = reduce (+) 0 mult_lens
       --------------------------------------------------------------
       -- The current iteration knows the primes <= 'len', 
@@ -74,44 +90,13 @@ let primesFlat (n : i64) : []i64 =
       -- Also note that `not_primes` has flat length equal to `flat_size`
       --  and the shape of `composite` is `mult_lens`. 
       
-    -- LECTURE SLIDES:
-    --let nested = map (\p ->
-      --let m = n ‘div‘ p in -- distribute map
-      --let mm1 = m - 1 in -- distribute map
-      --let iot = iota mm1 in -- F rule 4
-    --  let twom= map (+2) iot in -- F rule 2
-    --  let rp = replicate mm1 p in -- F rule 3
-    --  in map (\(j,p) -> j*p) (zip twom rp) -- F rule 2
-    --  ) sqrt_primes
+      let twoms = map (+2) (flattened_iota mult_lens) :> [flat_size]i64
+      let replicate_primes = flattened_replicate (mult_lens, sq_primes) :> [flat_size]i64
 
-      let aoa_shp = replicate flat_size 1 -- we want have a shape array [flat_size, flat_size, ...]
-      let aoa_val = replicate flat_size false
-      let flag_array = mkFlagArray aoa_shp false aoa_val :> [flat_size]bool
-      let arr = replicate flat_size 1i64 
-      let iots = segmented_scan (+) 0i64 flag_array arr 
-
-      -- PART:  let twom = map (+2) iot
-      --we apply rule 2 that a map (map f) becomes map f on a flattened array
-      let twoms = map (+2) iots 
-
-      -- PART: let rp = replicate mm1 p -- F rule 3
-      -- we use rule 3 that states that map (replicate) can be 
-      -- flattened to a composition of scan and scatter      
-      let inds = scan (+) 0 mult_lens
-      let size = (last inds) + (last mult_lens)
-      let flag = scatter (replicate size 0) inds mult_lens 
-
-      let bool_flag = map  (\ f -> if f != 0        
-              then true
-              else false
-      ) flag 
-      let vals = scatter (replicate size 0) inds sq_primes 
-      let rp_s = segmented_scan (+) 0i64 bool_flag vals 
-
-      let cast_twoms = twoms 
-      let not_primes = map (\(j,p) -> j*p) (zip cast_twoms rp_s)  
-
-
+      let not_primes = map2 (\j p -> 
+          j*p
+      ) twoms replicate_primes :> [flat_size]i64
+    
       --let not_primes = replicate flat_size 0i8
       -- If not_primes is correctly computed, then the remaining
       -- code is correct and will do the job of computing the prime
