@@ -1062,7 +1062,7 @@ static int report_events_in_list(struct event_list *l,
 #include <getopt.h>
 #include <ctype.h>
 #include <inttypes.h>
-#include <unistd.h>
+static const char *entry_point = "main";
 // Start of values.h.
 
 //// Text I/O
@@ -1887,12 +1887,1000 @@ static int write_scalar(FILE *out, int write_binary, const struct primtype_info_
 
 // End of values.h.
 
-static int binary_output = 0;
-static int print_result = 1;
-static FILE *runtime_file;
-static int perform_warmup = 0;
-static int num_runs = 1;
-static const char *entry_point = "main";
+// Start of server.h.
+
+// Forward declarations of things that we technically don't know until
+// the application header file is included, but which we need.
+struct futhark_context_config;
+struct futhark_context;
+char *futhark_context_get_error(struct futhark_context *ctx);
+int futhark_context_sync(struct futhark_context *ctx);
+int futhark_context_clear_caches(struct futhark_context *ctx);
+int futhark_context_config_set_tuning_param(struct futhark_context_config *cfg,
+                                            const char *param_name,
+                                            size_t new_value);
+int futhark_get_tuning_param_count(void);
+const char* futhark_get_tuning_param_name(int i);
+const char* futhark_get_tuning_param_class(int i);
+
+typedef int (*restore_fn)(const void*, FILE *, struct futhark_context*, void*);
+typedef void (*store_fn)(const void*, FILE *, struct futhark_context*, void*);
+typedef int (*free_fn)(const void*, struct futhark_context*, void*);
+typedef int (*project_fn)(struct futhark_context*, void*, const void*);
+typedef int (*new_fn)(struct futhark_context*, void**, const void*[]);
+
+struct field {
+  const char *name;
+  const struct type *type;
+  project_fn project;
+};
+
+struct record {
+  int num_fields;
+  const struct field* fields;
+  new_fn new;
+};
+
+struct type {
+  const char *name;
+  restore_fn restore;
+  store_fn store;
+  free_fn free;
+  const void *aux;
+  const struct record *record;
+};
+
+int free_scalar(const void *aux, struct futhark_context *ctx, void *p) {
+  (void)aux;
+  (void)ctx;
+  (void)p;
+  // Nothing to do.
+  return 0;
+}
+
+#define DEF_SCALAR_TYPE(T)                                      \
+  int restore_##T(const void *aux, FILE *f,                     \
+                  struct futhark_context *ctx, void *p) {       \
+    (void)aux;                                                  \
+    (void)ctx;                                                  \
+    return read_scalar(f, &T##_info, p);                        \
+  }                                                             \
+                                                                \
+  void store_##T(const void *aux, FILE *f,                      \
+                 struct futhark_context *ctx, void *p) {        \
+    (void)aux;                                                  \
+    (void)ctx;                                                  \
+    write_scalar(f, 1, &T##_info, p);                           \
+  }                                                             \
+                                                                \
+  struct type type_##T =                                        \
+    { .name = #T,                                               \
+      .restore = restore_##T,                                   \
+      .store = store_##T,                                       \
+      .free = free_scalar                                       \
+    }                                                           \
+
+DEF_SCALAR_TYPE(i8);
+DEF_SCALAR_TYPE(i16);
+DEF_SCALAR_TYPE(i32);
+DEF_SCALAR_TYPE(i64);
+DEF_SCALAR_TYPE(u8);
+DEF_SCALAR_TYPE(u16);
+DEF_SCALAR_TYPE(u32);
+DEF_SCALAR_TYPE(u64);
+DEF_SCALAR_TYPE(f16);
+DEF_SCALAR_TYPE(f32);
+DEF_SCALAR_TYPE(f64);
+DEF_SCALAR_TYPE(bool);
+
+struct value {
+  const struct type *type;
+  union {
+    void *v_ptr;
+    int8_t  v_i8;
+    int16_t v_i16;
+    int32_t v_i32;
+    int64_t v_i64;
+
+    uint8_t  v_u8;
+    uint16_t v_u16;
+    uint32_t v_u32;
+    uint64_t v_u64;
+
+    uint16_t v_f16;
+    float v_f32;
+    double v_f64;
+
+    bool v_bool;
+  } value;
+};
+
+void* value_ptr(struct value *v) {
+  if (v->type == &type_i8) {
+    return &v->value.v_i8;
+  }
+  if (v->type == &type_i16) {
+    return &v->value.v_i16;
+  }
+  if (v->type == &type_i32) {
+    return &v->value.v_i32;
+  }
+  if (v->type == &type_i64) {
+    return &v->value.v_i64;
+  }
+  if (v->type == &type_u8) {
+    return &v->value.v_u8;
+  }
+  if (v->type == &type_u16) {
+    return &v->value.v_u16;
+  }
+  if (v->type == &type_u32) {
+    return &v->value.v_u32;
+  }
+  if (v->type == &type_u64) {
+    return &v->value.v_u64;
+  }
+  if (v->type == &type_f16) {
+    return &v->value.v_f16;
+  }
+  if (v->type == &type_f32) {
+    return &v->value.v_f32;
+  }
+  if (v->type == &type_f64) {
+    return &v->value.v_f64;
+  }
+  if (v->type == &type_bool) {
+    return &v->value.v_bool;
+  }
+  return &v->value.v_ptr;
+}
+
+struct variable {
+  // NULL name indicates free slot.  Name is owned by this struct.
+  char *name;
+  struct value value;
+};
+
+typedef int (*entry_point_fn)(struct futhark_context*, void**, void**);
+
+struct entry_point {
+  const char *name;
+  entry_point_fn f;
+  const char** tuning_params;
+  const struct type **out_types;
+  bool *out_unique;
+  const struct type **in_types;
+  bool *in_unique;
+};
+
+int entry_num_ins(struct entry_point *e) {
+  int count = 0;
+  while (e->in_types[count]) {
+    count++;
+  }
+  return count;
+}
+
+int entry_num_outs(struct entry_point *e) {
+  int count = 0;
+  while (e->out_types[count]) {
+    count++;
+  }
+  return count;
+}
+
+struct futhark_prog {
+  // Last entry point identified by NULL name.
+  struct entry_point *entry_points;
+  // Last type identified by NULL name.
+  const struct type **types;
+};
+
+struct server_state {
+  struct futhark_prog prog;
+  struct futhark_context_config *cfg;
+  struct futhark_context *ctx;
+  int variables_capacity;
+  struct variable *variables;
+};
+
+struct variable* get_variable(struct server_state *s,
+                              const char *name) {
+  for (int i = 0; i < s->variables_capacity; i++) {
+    if (s->variables[i].name != NULL &&
+        strcmp(s->variables[i].name, name) == 0) {
+      return &s->variables[i];
+    }
+  }
+
+  return NULL;
+}
+
+struct variable* create_variable(struct server_state *s,
+                                 const char *name,
+                                 const struct type *type) {
+  int found = -1;
+  for (int i = 0; i < s->variables_capacity; i++) {
+    if (found == -1 && s->variables[i].name == NULL) {
+      found = i;
+    } else if (s->variables[i].name != NULL &&
+               strcmp(s->variables[i].name, name) == 0) {
+      return NULL;
+    }
+  }
+
+  if (found != -1) {
+    // Found a free spot.
+    s->variables[found].name = strdup(name);
+    s->variables[found].value.type = type;
+    return &s->variables[found];
+  }
+
+  // Need to grow the buffer.
+  found = s->variables_capacity;
+  s->variables_capacity *= 2;
+  s->variables = realloc(s->variables,
+                         s->variables_capacity * sizeof(struct variable));
+
+  s->variables[found].name = strdup(name);
+  s->variables[found].value.type = type;
+
+  for (int i = found+1; i < s->variables_capacity; i++) {
+    s->variables[i].name = NULL;
+  }
+
+  return &s->variables[found];
+}
+
+void drop_variable(struct variable *v) {
+  free(v->name);
+  v->name = NULL;
+}
+
+int arg_exists(const char *args[], int i) {
+  return args[i] != NULL;
+}
+
+const char* get_arg(const char *args[], int i) {
+  if (!arg_exists(args, i)) {
+    futhark_panic(1, "Insufficient command args.\n");
+  }
+  return args[i];
+}
+
+const struct type* get_type(struct server_state *s, const char *name) {
+  for (int i = 0; s->prog.types[i]; i++) {
+    if (strcmp(s->prog.types[i]->name, name) == 0) {
+      return s->prog.types[i];
+    }
+  }
+
+  futhark_panic(1, "Unknown type %s\n", name);
+  return NULL;
+}
+
+struct entry_point* get_entry_point(struct server_state *s, const char *name) {
+  for (int i = 0; s->prog.entry_points[i].name; i++) {
+    if (strcmp(s->prog.entry_points[i].name, name) == 0) {
+      return &s->prog.entry_points[i];
+    }
+  }
+
+  return NULL;
+}
+
+// Print the command-done marker, indicating that we are ready for
+// more input.
+void ok(void) {
+  printf("%%%%%% OK\n");
+  fflush(stdout);
+}
+
+// Print the failure marker.  Output is now an error message until the
+// next ok().
+void failure(void) {
+  printf("%%%%%% FAILURE\n");
+}
+
+void error_check(struct server_state *s, int err) {
+  if (err != 0) {
+    failure();
+    char *error = futhark_context_get_error(s->ctx);
+    if (error != NULL) {
+      puts(error);
+    }
+    free(error);
+  }
+}
+
+void cmd_call(struct server_state *s, const char *args[]) {
+  const char *name = get_arg(args, 0);
+
+  struct entry_point *e = get_entry_point(s, name);
+
+  if (e == NULL) {
+    failure();
+    printf("Unknown entry point: %s\n", name);
+    return;
+  }
+
+  int num_outs = entry_num_outs(e);
+  int num_ins = entry_num_ins(e);
+  // +1 to avoid zero-size arrays, which is UB.
+  void* outs[num_outs+1];
+  void* ins[num_ins+1];
+
+  for (int i = 0; i < num_ins; i++) {
+    const char *in_name = get_arg(args, 1+num_outs+i);
+    struct variable *v = get_variable(s, in_name);
+    if (v == NULL) {
+      failure();
+      printf("Unknown variable: %s\n", in_name);
+      return;
+    }
+    if (v->value.type != e->in_types[i]) {
+      failure();
+      printf("Wrong input type.  Expected %s, got %s.\n",
+             e->in_types[i]->name, v->value.type->name);
+      return;
+    }
+    ins[i] = value_ptr(&v->value);
+  }
+
+  for (int i = 0; i < num_outs; i++) {
+    const char *out_name = get_arg(args, 1+i);
+    struct variable *v = create_variable(s, out_name, e->out_types[i]);
+    if (v == NULL) {
+      failure();
+      printf("Variable already exists: %s\n", out_name);
+      return;
+    }
+    outs[i] = value_ptr(&v->value);
+  }
+
+  int64_t t_start = get_wall_time();
+  int err = e->f(s->ctx, outs, ins);
+  err |= futhark_context_sync(s->ctx);
+  int64_t t_end = get_wall_time();
+  long long int elapsed_usec = t_end - t_start;
+  printf("runtime: %lld\n", elapsed_usec);
+
+  error_check(s, err);
+  if (err != 0) {
+    // Need to uncreate the output variables, which would otherwise be left
+    // in an uninitialised state.
+    for (int i = 0; i < num_outs; i++) {
+      const char *out_name = get_arg(args, 1+i);
+      struct variable *v = get_variable(s, out_name);
+      if (v) {
+        drop_variable(v);
+      }
+    }
+  }
+}
+
+void cmd_restore(struct server_state *s, const char *args[]) {
+  const char *fname = get_arg(args, 0);
+
+  FILE *f = fopen(fname, "rb");
+  if (f == NULL) {
+    failure();
+    printf("Failed to open %s: %s\n", fname, strerror(errno));
+    return;
+  }
+
+  int bad = 0;
+  int values = 0;
+  for (int i = 1; arg_exists(args, i); i+=2, values++) {
+    const char *vname = get_arg(args, i);
+    const char *type = get_arg(args, i+1);
+
+    const struct type *t = get_type(s, type);
+    struct variable *v = create_variable(s, vname, t);
+
+    if (v == NULL) {
+      bad = 1;
+      failure();
+      printf("Variable already exists: %s\n", vname);
+      break;
+    }
+
+    errno = 0;
+    if (t->restore(t->aux, f, s->ctx, value_ptr(&v->value)) != 0) {
+      bad = 1;
+      failure();
+      printf("Failed to restore variable %s.\n"
+             "Possibly malformed data in %s (errno: %s)\n",
+             vname, fname, strerror(errno));
+      drop_variable(v);
+      break;
+    }
+  }
+
+  if (!bad && end_of_input(f) != 0) {
+    failure();
+    printf("Expected EOF after reading %d values from %s\n",
+           values, fname);
+  }
+
+  fclose(f);
+
+  if (!bad) {
+    int err = futhark_context_sync(s->ctx);
+    error_check(s, err);
+  }
+}
+
+void cmd_store(struct server_state *s, const char *args[]) {
+  const char *fname = get_arg(args, 0);
+
+  FILE *f = fopen(fname, "wb");
+  if (f == NULL) {
+    failure();
+    printf("Failed to open %s: %s\n", fname, strerror(errno));
+  } else {
+    for (int i = 1; arg_exists(args, i); i++) {
+      const char *vname = get_arg(args, i);
+      struct variable *v = get_variable(s, vname);
+
+      if (v == NULL) {
+        failure();
+        printf("Unknown variable: %s\n", vname);
+        return;
+      }
+
+      const struct type *t = v->value.type;
+      t->store(t->aux, f, s->ctx, value_ptr(&v->value));
+    }
+    fclose(f);
+  }
+}
+
+void cmd_free(struct server_state *s, const char *args[]) {
+  for (int i = 0; arg_exists(args, i); i++) {
+    const char *name = get_arg(args, i);
+    struct variable *v = get_variable(s, name);
+
+    if (v == NULL) {
+      failure();
+      printf("Unknown variable: %s\n", name);
+      return;
+    }
+
+    const struct type *t = v->value.type;
+
+    int err = t->free(t->aux, s->ctx, value_ptr(&v->value));
+    error_check(s, err);
+    drop_variable(v);
+  }
+}
+
+void cmd_rename(struct server_state *s, const char *args[]) {
+  const char *oldname = get_arg(args, 0);
+  const char *newname = get_arg(args, 1);
+  struct variable *old = get_variable(s, oldname);
+  struct variable *new = get_variable(s, newname);
+
+  if (old == NULL) {
+    failure();
+    printf("Unknown variable: %s\n", oldname);
+    return;
+  }
+
+  if (new != NULL) {
+    failure();
+    printf("Variable already exists: %s\n", newname);
+    return;
+  }
+
+  free(old->name);
+  old->name = strdup(newname);
+}
+
+void cmd_inputs(struct server_state *s, const char *args[]) {
+  const char *name = get_arg(args, 0);
+  struct entry_point *e = get_entry_point(s, name);
+
+  if (e == NULL) {
+    failure();
+    printf("Unknown entry point: %s\n", name);
+    return;
+  }
+
+  int num_ins = entry_num_ins(e);
+  for (int i = 0; i < num_ins; i++) {
+    if (e->in_unique[i]) {
+      putchar('*');
+    }
+    puts(e->in_types[i]->name);
+  }
+}
+
+void cmd_outputs(struct server_state *s, const char *args[]) {
+  const char *name = get_arg(args, 0);
+  struct entry_point *e = get_entry_point(s, name);
+
+  if (e == NULL) {
+    failure();
+    printf("Unknown entry point: %s\n", name);
+    return;
+  }
+
+  int num_outs = entry_num_outs(e);
+  for (int i = 0; i < num_outs; i++) {
+    if (e->out_unique[i]) {
+      putchar('*');
+    }
+    puts(e->out_types[i]->name);
+  }
+}
+
+void cmd_clear(struct server_state *s, const char *args[]) {
+  (void)args;
+  int err = 0;
+  for (int i = 0; i < s->variables_capacity; i++) {
+    struct variable *v = &s->variables[i];
+    if (v->name != NULL) {
+      err |= v->value.type->free(v->value.type->aux, s->ctx, value_ptr(&v->value));
+      drop_variable(v);
+    }
+  }
+  err |= futhark_context_clear_caches(s->ctx);
+  error_check(s, err);
+}
+
+void cmd_pause_profiling(struct server_state *s, const char *args[]) {
+  (void)args;
+  futhark_context_pause_profiling(s->ctx);
+}
+
+void cmd_unpause_profiling(struct server_state *s, const char *args[]) {
+  (void)args;
+  futhark_context_unpause_profiling(s->ctx);
+}
+
+void cmd_report(struct server_state *s, const char *args[]) {
+  (void)args;
+  char *report = futhark_context_report(s->ctx);
+  if (report) {
+    puts(report);
+  } else {
+    failure();
+    report = futhark_context_get_error(s->ctx);
+    if (report) {
+      puts(report);
+    } else {
+      puts("Failed to produce profiling report.\n");
+    }
+  }
+  free(report);
+}
+
+void cmd_set_tuning_param(struct server_state *s, const char *args[]) {
+  const char *param = get_arg(args, 0);
+  const char *val_s = get_arg(args, 1);
+  size_t val = atol(val_s);
+  int err = futhark_context_config_set_tuning_param(s->cfg, param, val);
+
+  error_check(s, err);
+
+  if (err != 0) {
+    printf("Failed to set tuning parameter %s to %ld\n", param, (long)val);
+  }
+}
+
+void cmd_tuning_params(struct server_state *s, const char *args[]) {
+  const char *name = get_arg(args, 0);
+  struct entry_point *e = get_entry_point(s, name);
+
+  if (e == NULL) {
+    failure();
+    printf("Unknown entry point: %s\n", name);
+    return;
+  }
+
+  const char **params = e->tuning_params;
+  for (int i = 0; params[i] != NULL; i++) {
+    printf("%s\n", params[i]);
+  }
+}
+
+void cmd_tuning_param_class(struct server_state *s, const char *args[]) {
+  (void)s;
+  const char *param = get_arg(args, 0);
+
+  int n = futhark_get_tuning_param_count();
+
+  for (int i = 0; i < n; i++) {
+    if (strcmp(futhark_get_tuning_param_name(i), param) == 0) {
+      printf("%s\n", futhark_get_tuning_param_class(i));
+      return;
+    }
+  }
+
+  failure();
+  printf("Unknown tuning parameter: %s\n", param);
+}
+
+void cmd_fields(struct server_state *s, const char *args[]) {
+  const char *type = get_arg(args, 0);
+  const struct type *t = get_type(s, type);
+  const struct record *r = t->record;
+
+  if (r == NULL) {
+    failure();
+    printf("Not a record type\n");
+    return;
+  }
+
+  for (int i = 0; i < r->num_fields; i++) {
+    const struct field f = r->fields[i];
+    printf("%s %s\n", f.name, f.type->name);
+  }
+}
+
+void cmd_project(struct server_state *s, const char *args[]) {
+  const char *to_name = get_arg(args, 0);
+  const char *from_name = get_arg(args, 1);
+  const char *field_name = get_arg(args, 2);
+
+  struct variable *from = get_variable(s, from_name);
+
+  if (from == NULL) {
+    failure();
+    printf("Unknown variable: %s\n", from_name);
+    return;
+  }
+
+  const struct type *from_type = from->value.type;
+  const struct record *r = from_type->record;
+
+  if (r == NULL) {
+    failure();
+    printf("Not a record type\n");
+    return;
+  }
+
+  const struct field *field = NULL;
+  for (int i = 0; i < r->num_fields; i++) {
+    if (strcmp(r->fields[i].name, field_name) == 0) {
+      field = &r->fields[i];
+      break;
+    }
+  }
+
+  if (field == NULL) {
+    failure();
+    printf("No such field\n");
+  }
+
+  struct variable *to = create_variable(s, to_name, field->type);
+
+  if (to == NULL) {
+    failure();
+    printf("Variable already exists: %s\n", to_name);
+    return;
+  }
+
+  field->project(s->ctx, value_ptr(&to->value), from->value.value.v_ptr);
+}
+
+void cmd_new(struct server_state *s, const char *args[]) {
+  const char *to_name = get_arg(args, 0);
+  const char *type_name = get_arg(args, 1);
+  const struct type *type = get_type(s, type_name);
+  struct variable *to = create_variable(s, to_name, type);
+
+  if (to == NULL) {
+    failure();
+    printf("Variable already exists: %s\n", to_name);
+    return;
+  }
+
+  const struct record* r = type->record;
+
+  if (r == NULL) {
+    failure();
+    printf("Not a record type\n");
+    return;
+  }
+
+  int num_args = 0;
+  for (int i = 2; arg_exists(args, i); i++) {
+    num_args++;
+  }
+
+  if (num_args != r->num_fields) {
+    failure();
+    printf("%d fields expected but %d values provided.\n", num_args, r->num_fields);
+    return;
+  }
+
+  const void** value_ptrs = alloca(num_args * sizeof(void*));
+
+  for (int i = 0; i < num_args; i++) {
+    struct variable* v = get_variable(s, args[2+i]);
+
+    if (v == NULL) {
+      failure();
+      printf("Unknown variable: %s\n", args[2+i]);
+      return;
+    }
+
+    if (strcmp(v->value.type->name, r->fields[i].type->name) != 0) {
+      failure();
+      printf("Field %s mismatch: expected type %s, got %s\n",
+             r->fields[i].name, r->fields[i].type->name, v->value.type->name);
+      return;
+    }
+
+    value_ptrs[i] = value_ptr(&v->value);
+  }
+
+  r->new(s->ctx, value_ptr(&to->value), value_ptrs);
+}
+
+void cmd_entry_points(struct server_state *s, const char *args[]) {
+  (void)args;
+  for (int i = 0; s->prog.entry_points[i].name; i++) {
+    puts(s->prog.entry_points[i].name);
+  }
+}
+
+void cmd_types(struct server_state *s, const char *args[]) {
+  (void)args;
+  for (int i = 0; s->prog.types[i] != NULL; i++) {
+    puts(s->prog.types[i]->name);
+  }
+}
+
+char *next_word(char **line) {
+  char *p = *line;
+
+  while (isspace(*p)) {
+    p++;
+  }
+
+  if (*p == 0) {
+    return NULL;
+  }
+
+  if (*p == '"') {
+    char *save = p+1;
+    // Skip ahead till closing quote.
+    p++;
+
+    while (*p && *p != '"') {
+      p++;
+    }
+
+    if (*p == '"') {
+      *p = 0;
+      *line = p+1;
+      return save;
+    } else {
+      return NULL;
+    }
+  } else {
+    char *save = p;
+    // Skip ahead till next whitespace.
+
+    while (*p && !isspace(*p)) {
+      p++;
+    }
+
+    if (*p) {
+      *p = 0;
+      *line = p+1;
+    } else {
+      *line = p;
+    }
+    return save;
+  }
+}
+
+void process_line(struct server_state *s, char *line) {
+  int max_num_tokens = 1000;
+  const char* tokens[max_num_tokens];
+  int num_tokens = 0;
+
+  while ((tokens[num_tokens] = next_word(&line)) != NULL) {
+    num_tokens++;
+    if (num_tokens == max_num_tokens) {
+      futhark_panic(1, "Line too long.\n");
+    }
+  }
+
+  const char *command = tokens[0];
+
+  if (command == NULL) {
+    failure();
+    printf("Empty line\n");
+  } else if (strcmp(command, "call") == 0) {
+    cmd_call(s, tokens+1);
+  } else if (strcmp(command, "restore") == 0) {
+    cmd_restore(s, tokens+1);
+  } else if (strcmp(command, "store") == 0) {
+    cmd_store(s, tokens+1);
+  } else if (strcmp(command, "free") == 0) {
+    cmd_free(s, tokens+1);
+  } else if (strcmp(command, "rename") == 0) {
+    cmd_rename(s, tokens+1);
+  } else if (strcmp(command, "inputs") == 0) {
+    cmd_inputs(s, tokens+1);
+  } else if (strcmp(command, "outputs") == 0) {
+    cmd_outputs(s, tokens+1);
+  } else if (strcmp(command, "clear") == 0) {
+    cmd_clear(s, tokens+1);
+  } else if (strcmp(command, "pause_profiling") == 0) {
+    cmd_pause_profiling(s, tokens+1);
+  } else if (strcmp(command, "unpause_profiling") == 0) {
+    cmd_unpause_profiling(s, tokens+1);
+  } else if (strcmp(command, "report") == 0) {
+    cmd_report(s, tokens+1);
+  } else if (strcmp(command, "set_tuning_param") == 0) {
+    cmd_set_tuning_param(s, tokens+1);
+  } else if (strcmp(command, "tuning_params") == 0) {
+    cmd_tuning_params(s, tokens+1);
+  } else if (strcmp(command, "tuning_param_class") == 0) {
+    cmd_tuning_param_class(s, tokens+1);
+  } else if (strcmp(command, "fields") == 0) {
+    cmd_fields(s, tokens+1);
+  } else if (strcmp(command, "new") == 0) {
+    cmd_new(s, tokens+1);
+  } else if (strcmp(command, "project") == 0) {
+    cmd_project(s, tokens+1);
+  } else if (strcmp(command, "entry_points") == 0) {
+    cmd_entry_points(s, tokens+1);
+  } else if (strcmp(command, "types") == 0) {
+    cmd_types(s, tokens+1);
+  } else {
+    futhark_panic(1, "Unknown command: %s\n", command);
+  }
+}
+
+void run_server(struct futhark_prog *prog,
+                struct futhark_context_config *cfg,
+                struct futhark_context *ctx) {
+  char *line = NULL;
+  size_t buflen = 0;
+  ssize_t linelen;
+
+  struct server_state s = {
+    .cfg = cfg,
+    .ctx = ctx,
+    .variables_capacity = 100,
+    .prog = *prog
+  };
+
+  s.variables = malloc(s.variables_capacity * sizeof(struct variable));
+
+  for (int i = 0; i < s.variables_capacity; i++) {
+    s.variables[i].name = NULL;
+  }
+
+  ok();
+  while ((linelen = getline(&line, &buflen, stdin)) > 0) {
+    process_line(&s, line);
+    ok();
+  }
+
+  free(s.variables);
+  free(line);
+}
+
+// The aux struct lets us write generic method implementations without
+// code duplication.
+
+typedef void* (*array_new_fn)(struct futhark_context *, const void*, const int64_t*);
+typedef const int64_t* (*array_shape_fn)(struct futhark_context*, void*);
+typedef int (*array_values_fn)(struct futhark_context*, void*, void*);
+typedef int (*array_free_fn)(struct futhark_context*, void*);
+
+struct array_aux {
+  int rank;
+  const struct primtype_info_t* info;
+  const char *name;
+  array_new_fn new;
+  array_shape_fn shape;
+  array_values_fn values;
+  array_free_fn free;
+};
+
+int restore_array(const struct array_aux *aux, FILE *f,
+                  struct futhark_context *ctx, void *p) {
+  void *data = NULL;
+  int64_t shape[aux->rank];
+  if (read_array(f, aux->info, &data, shape, aux->rank) != 0) {
+    return 1;
+  }
+
+  void *arr = aux->new(ctx, data, shape);
+  if (arr == NULL) {
+    return 1;
+  }
+  int err = futhark_context_sync(ctx);
+  *(void**)p = arr;
+  free(data);
+  return err;
+}
+
+void store_array(const struct array_aux *aux, FILE *f,
+                 struct futhark_context *ctx, void *p) {
+  void *arr = *(void**)p;
+  const int64_t *shape = aux->shape(ctx, arr);
+  int64_t size = sizeof(aux->info->size);
+  for (int i = 0; i < aux->rank; i++) {
+    size *= shape[i];
+  }
+  int32_t *data = malloc(size);
+  assert(aux->values(ctx, arr, data) == 0);
+  assert(futhark_context_sync(ctx) == 0);
+  assert(write_array(f, 1, aux->info, data, shape, aux->rank) == 0);
+  free(data);
+}
+
+int free_array(const struct array_aux *aux,
+               struct futhark_context *ctx, void *p) {
+  void *arr = *(void**)p;
+  return aux->free(ctx, arr);
+}
+
+typedef void* (*opaque_restore_fn)(struct futhark_context*, void*);
+typedef int (*opaque_store_fn)(struct futhark_context*, const void*, void **, size_t *);
+typedef int (*opaque_free_fn)(struct futhark_context*, void*);
+
+struct opaque_aux {
+  opaque_restore_fn restore;
+  opaque_store_fn store;
+  opaque_free_fn free;
+};
+
+int restore_opaque(const struct opaque_aux *aux, FILE *f,
+                   struct futhark_context *ctx, void *p) {
+  // We have a problem: we need to load data from 'f', since the
+  // restore function takes a pointer, but we don't know how much we
+  // need (and cannot possibly).  So we do something hacky: we read
+  // *all* of the file, pass all of the data to the restore function
+  // (which doesn't care if there's extra at the end), then we compute
+  // how much space the the object actually takes in serialised form
+  // and rewind the file to that position.  The only downside is more IO.
+  size_t start = ftell(f);
+  size_t size;
+  char *bytes = fslurp_file(f, &size);
+  void *obj = aux->restore(ctx, bytes);
+  free(bytes);
+  if (obj != NULL) {
+    *(void**)p = obj;
+    size_t obj_size;
+    (void)aux->store(ctx, obj, NULL, &obj_size);
+    fseek(f, start+obj_size, SEEK_SET);
+    return 0;
+  } else {
+    fseek(f, start, SEEK_SET);
+    return 1;
+  }
+}
+
+void store_opaque(const struct opaque_aux *aux, FILE *f,
+                  struct futhark_context *ctx, void *p) {
+  void *obj = *(void**)p;
+  size_t obj_size;
+  void *data = NULL;
+  (void)aux->store(ctx, obj, &data, &obj_size);
+  assert(futhark_context_sync(ctx) == 0);
+  fwrite(data, sizeof(char), obj_size, f);
+  free(data);
+}
+
+int free_opaque(const struct opaque_aux *aux,
+                struct futhark_context *ctx, void *p) {
+  void *obj = *(void**)p;
+  return aux->free(ctx, obj);
+}
+
+// End of server.h.
+
 // Start of tuning.h.
 
 
@@ -1951,50 +2939,53 @@ static char* load_tuning_file(const char *fname,
 
 // End of tuning.h.
 
+const struct type type_ZMZNi64;
+void *futhark_new_i64_1d_wrap(struct futhark_context *ctx, const void *p, const int64_t *shape)
+{
+    return futhark_new_i64_1d(ctx, p, shape[0]);
+}
+const struct array_aux type_ZMZNi64_aux = {.name ="[]i64", .rank =1, .info =&i64_info, .new =(array_new_fn) futhark_new_i64_1d_wrap, .free =(array_free_fn) futhark_free_i64_1d, .shape =(array_shape_fn) futhark_shape_i64_1d, .values =(array_values_fn) futhark_values_i64_1d};
+const struct type type_ZMZNi64 = {.name ="[]i64", .restore =(restore_fn) restore_array, .store =(store_fn) store_array, .free =(free_fn) free_array, .aux =&type_ZMZNi64_aux};
+const struct type *main_out_types[] = {&type_ZMZNi64, NULL};
+bool main_out_unique[] = {false};
+const struct type *main_in_types[] = {&type_i64, NULL};
+bool main_in_unique[] = {false};
+const char *main_tuning_params[] = {NULL};
+int call_main(struct futhark_context *ctx, void **outs, void **ins)
+{
+    struct futhark_i64_1d * *out0 = outs[0];
+    int64_t in0 = *(int64_t *) ins[0];
+    
+    return futhark_entry_main(ctx, out0, in0);
+}
+const struct type *types[] = {&type_i8, &type_i16, &type_i32, &type_i64, &type_u8, &type_u16, &type_u32, &type_u64, &type_f16, &type_f32, &type_f64, &type_bool, &type_ZMZNi64, NULL};
+struct entry_point entry_points[] = {{.name ="main", .f =call_main, .tuning_params =main_tuning_params, .in_types =main_in_types, .out_types =main_out_types, .in_unique =main_in_unique, .out_unique =main_out_unique}, {.name =NULL}};
+struct futhark_prog prog = {.types =types, .entry_points =entry_points};
 int parse_options(struct futhark_context_config *cfg, int argc, char *const argv[])
 {
     int ch;
-    static struct option long_options[] = {{"write-runtime-to", required_argument, NULL, 1}, {"runs", required_argument, NULL, 2}, {"debugging", no_argument, NULL, 3}, {"log", no_argument, NULL, 4}, {"profile", no_argument, NULL, 5}, {"entry-point", required_argument, NULL, 6}, {"binary-output", no_argument, NULL, 7}, {"no-print-result", no_argument, NULL, 8}, {"help", no_argument, NULL, 9}, {"print-params", no_argument, NULL, 10}, {"param", required_argument, NULL, 11}, {"tuning", required_argument, NULL, 12}, {"cache-file", required_argument, NULL, 13}, {0, 0, 0, 0}};
-    static char *option_descriptions = "  -t/--write-runtime-to FILE Print the time taken to execute the program to the indicated file, an integral number of microseconds.\n  -r/--runs INT              Perform NUM runs of the program.\n  -D/--debugging             Perform possibly expensive internal correctness checks and verbose logging.\n  -L/--log                   Print various low-overhead logging information to stderr while running.\n  -P/--profile               Enable the collection of profiling information.\n  -e/--entry-point NAME      The entry point to run. Defaults to main.\n  -b/--binary-output         Print the program result in the binary output format.\n  -n/--no-print-result       Do not print the program result.\n  -h/--help                  Print help information and exit.\n  --print-params             Print all tuning parameters that can be set with --param or --tuning.\n  --param ASSIGNMENT         Set a tuning parameter to the given value.\n  --tuning FILE              Read size=value assignments from the given file.\n  --cache-file FILE          Store program cache here.\n";
+    static struct option long_options[] = {{"debugging", no_argument, NULL, 1}, {"log", no_argument, NULL, 2}, {"profile", no_argument, NULL, 3}, {"help", no_argument, NULL, 4}, {"print-params", no_argument, NULL, 5}, {"param", required_argument, NULL, 6}, {"tuning", required_argument, NULL, 7}, {"cache-file", required_argument, NULL, 8}, {0, 0, 0, 0}};
+    static char *option_descriptions = "  -D/--debugging     Perform possibly expensive internal correctness checks and verbose logging.\n  -L/--log           Print various low-overhead logging information while running.\n  -P/--profile       Enable the collection of profiling information.\n  -h/--help          Print help information and exit.\n  --print-params     Print all tuning parameters that can be set with --param or --tuning.\n  --param ASSIGNMENT Set a tuning parameter to the given value.\n  --tuning FILE      Read size=value assignments from the given file.\n  --cache-file FILE  Store program cache here.\n";
     
-    while ((ch = getopt_long(argc, argv, ":t:r:DLPe:bnh", long_options, NULL)) != -1) {
-        if (ch == 1 || ch == 't') {
-            runtime_file = fopen(optarg, "w");
-            if (runtime_file == NULL)
-                futhark_panic(1, "Cannot open %s: %s\n", optarg, strerror(errno));
-        }
-        if (ch == 2 || ch == 'r') {
-            num_runs = atoi(optarg);
-            perform_warmup = 1;
-            if (num_runs <= 0)
-                futhark_panic(1, "Need a positive number of runs, not %s\n", optarg);
-        }
-        if (ch == 3 || ch == 'D')
+    while ((ch = getopt_long(argc, argv, ":DLPh", long_options, NULL)) != -1) {
+        if (ch == 1 || ch == 'D')
             futhark_context_config_set_debugging(cfg, 1);
-        if (ch == 4 || ch == 'L')
+        if (ch == 2 || ch == 'L')
             futhark_context_config_set_logging(cfg, 1);
-        if (ch == 5 || ch == 'P')
+        if (ch == 3 || ch == 'P')
             futhark_context_config_set_profiling(cfg, 1);
-        if (ch == 6 || ch == 'e') {
-            if (entry_point != NULL)
-                entry_point = optarg;
-        }
-        if (ch == 7 || ch == 'b')
-            binary_output = 1;
-        if (ch == 8 || ch == 'n')
-            print_result = 0;
-        if (ch == 9 || ch == 'h') {
-            printf("Usage: %s [OPTION]...\nOptions:\n\n%s\nFor more information, consult the Futhark User's Guide or the man pages.\n", fut_progname, option_descriptions);
+        if (ch == 4 || ch == 'h') {
+            printf("Usage: %s [OPTIONS]...\nOptions:\n\n%s\nFor more information, consult the Futhark User's Guide or the man pages.\n", fut_progname, option_descriptions);
             exit(0);
         }
-        if (ch == 10) {
+        if (ch == 5) {
             int n = futhark_get_tuning_param_count();
             
             for (int i = 0; i < n; i++)
                 printf("%s (%s)\n", futhark_get_tuning_param_name(i), futhark_get_tuning_param_class(i));
             exit(0);
         }
-        if (ch == 11) {
+        if (ch == 6) {
             char *name = optarg;
             char *equals = strstr(optarg, "=");
             char *value_str = equals != NULL ? equals + 1 : optarg;
@@ -2002,147 +2993,30 @@ int parse_options(struct futhark_context_config *cfg, int argc, char *const argv
             
             if (equals != NULL) {
                 *equals = 0;
-                if (futhark_context_config_set_tuning_param(cfg, name, (size_t) value) != 0)
+                if (futhark_context_config_set_tuning_param(cfg, name, value) != 0)
                     futhark_panic(1, "Unknown size: %s\n", name);
             } else
                 futhark_panic(1, "Invalid argument for size option: %s\n", optarg);
         }
-        if (ch == 12) {
+        if (ch == 7) {
             char *ret = load_tuning_file(optarg, cfg, (int (*)(void *, const char *, size_t)) futhark_context_config_set_tuning_param);
             
             if (ret != NULL)
                 futhark_panic(1, "When loading tuning file '%s': %s\n", optarg, ret);
         }
-        if (ch == 13)
+        if (ch == 8)
             futhark_context_config_set_cache_file(cfg, optarg);
         if (ch == ':')
             futhark_panic(-1, "Missing argument for option %s\n", argv[optind - 1]);
         if (ch == '?') {
-            fprintf(stderr, "Usage: %s [OPTIONS]...\nOptions:\n\n%s\n", fut_progname, "  -t/--write-runtime-to FILE Print the time taken to execute the program to the indicated file, an integral number of microseconds.\n  -r/--runs INT              Perform NUM runs of the program.\n  -D/--debugging             Perform possibly expensive internal correctness checks and verbose logging.\n  -L/--log                   Print various low-overhead logging information to stderr while running.\n  -P/--profile               Enable the collection of profiling information.\n  -e/--entry-point NAME      The entry point to run. Defaults to main.\n  -b/--binary-output         Print the program result in the binary output format.\n  -n/--no-print-result       Do not print the program result.\n  -h/--help                  Print help information and exit.\n  --print-params             Print all tuning parameters that can be set with --param or --tuning.\n  --param ASSIGNMENT         Set a tuning parameter to the given value.\n  --tuning FILE              Read size=value assignments from the given file.\n  --cache-file FILE          Store program cache here.\n");
+            fprintf(stderr, "Usage: %s [OPTIONS]...\nOptions:\n\n%s\n", fut_progname, "  -D/--debugging     Perform possibly expensive internal correctness checks and verbose logging.\n  -L/--log           Print various low-overhead logging information while running.\n  -P/--profile       Enable the collection of profiling information.\n  -h/--help          Print help information and exit.\n  --print-params     Print all tuning parameters that can be set with --param or --tuning.\n  --param ASSIGNMENT Set a tuning parameter to the given value.\n  --tuning FILE      Read size=value assignments from the given file.\n  --cache-file FILE  Store program cache here.\n");
             futhark_panic(1, "Unknown option: %s\n", argv[optind - 1]);
         }
     }
     return optind;
 }
-static int futrts_cli_entry_main(struct futhark_context *ctx)
-{
-    int64_t t_start, t_end;
-    int time_runs = 0, profile_run = 0;
-    int retval = 0;
-    
-    // We do not want to profile all the initialisation.
-    futhark_context_pause_profiling(ctx);
-    // Declare and read input.
-    set_binary_mode(stdin);
-    
-    int64_t read_value_0;
-    
-    if (read_scalar(stdin, &i64_info, &read_value_0) != 0)
-        futhark_panic(1, "Error when reading input #%d of type %s (errno: %s).\n", 0, "i64", strerror(errno));
-    ;
-    if (end_of_input(stdin) != 0)
-        futhark_panic(1, "Expected EOF on stdin after reading input for \"%s\".\n", "main");
-    
-    struct futhark_i64_1d * result_0;
-    
-    if (perform_warmup) {
-        int r;
-        
-        ;
-        if (futhark_context_sync(ctx) != 0)
-            futhark_panic(1, "%s", futhark_context_get_error(ctx));
-        ;
-        // Only profile last run.
-        if (profile_run)
-            futhark_context_unpause_profiling(ctx);
-        t_start = get_wall_time();
-        r = futhark_entry_main(ctx, &result_0, read_value_0);
-        if (r != 0)
-            futhark_panic(1, "%s", futhark_context_get_error(ctx));
-        if (futhark_context_sync(ctx) != 0)
-            futhark_panic(1, "%s", futhark_context_get_error(ctx));
-        ;
-        if (profile_run)
-            futhark_context_pause_profiling(ctx);
-        t_end = get_wall_time();
-        
-        long elapsed_usec = t_end - t_start;
-        
-        if (time_runs && runtime_file != NULL) {
-            fprintf(runtime_file, "%lld\n", (long long) elapsed_usec);
-            fflush(runtime_file);
-        }
-        ;
-        assert(futhark_free_i64_1d(ctx, result_0) == 0);
-    }
-    time_runs = 1;
-    // Proper run.
-    for (int run = 0; run < num_runs; run++) {
-        // Only profile last run.
-        profile_run = run == num_runs - 1;
-        
-        int r;
-        
-        ;
-        if (futhark_context_sync(ctx) != 0)
-            futhark_panic(1, "%s", futhark_context_get_error(ctx));
-        ;
-        // Only profile last run.
-        if (profile_run)
-            futhark_context_unpause_profiling(ctx);
-        t_start = get_wall_time();
-        r = futhark_entry_main(ctx, &result_0, read_value_0);
-        if (r != 0)
-            futhark_panic(1, "%s", futhark_context_get_error(ctx));
-        if (futhark_context_sync(ctx) != 0)
-            futhark_panic(1, "%s", futhark_context_get_error(ctx));
-        ;
-        if (profile_run)
-            futhark_context_pause_profiling(ctx);
-        t_end = get_wall_time();
-        
-        long elapsed_usec = t_end - t_start;
-        
-        if (time_runs && runtime_file != NULL) {
-            fprintf(runtime_file, "%lld\n", (long long) elapsed_usec);
-            fflush(runtime_file);
-        }
-        ;
-        if (run < num_runs - 1) {
-            assert(futhark_free_i64_1d(ctx, result_0) == 0);
-        }
-    }
-    ;
-    if (print_result) {
-        // Print the final result.
-        if (binary_output)
-            set_binary_mode(stdout);
-        {
-            int64_t *arr = calloc(futhark_shape_i64_1d(ctx, result_0)[0], i64_info.size);
-            
-            assert(arr != NULL);
-            assert(futhark_values_i64_1d(ctx, result_0, arr) == 0);
-            assert(futhark_context_sync(ctx) == 0);
-            write_array(stdout, binary_output, &i64_info, arr, futhark_shape_i64_1d(ctx, result_0), 1);
-            free(arr);
-        }
-        printf("\n");
-    }
-    
-  print_end:
-    { }
-    assert(futhark_free_i64_1d(ctx, result_0) == 0);
-    return retval;
-}
-typedef int entry_point_fun(struct futhark_context *);
-struct entry_point_entry {
-    const char *name;
-    entry_point_fun *fun;
-};
 int main(int argc, char **argv)
 {
-    int retval = 0;
-    
     fut_progname = argv[0];
     
     struct futhark_context_config *cfg = futhark_context_config_new();
@@ -2159,41 +3033,16 @@ int main(int argc, char **argv)
     struct futhark_context *ctx = futhark_context_new(cfg);
     
     assert(ctx != NULL);
+    futhark_context_set_logging_file(ctx, stdout);
     
     char *error = futhark_context_get_error(ctx);
     
     if (error != NULL)
-        futhark_panic(1, "%s", error);
-    
-    struct entry_point_entry entry_points[] = {{.name ="main", .fun =futrts_cli_entry_main}};
-    
-    if (entry_point != NULL) {
-        int num_entry_points = sizeof(entry_points) / sizeof(entry_points[0]);
-        entry_point_fun *entry_point_fun = NULL;
-        
-        for (int i = 0; i < num_entry_points; i++) {
-            if (strcmp(entry_points[i].name, entry_point) == 0) {
-                entry_point_fun = entry_points[i].fun;
-                break;
-            }
-        }
-        if (entry_point_fun == NULL) {
-            fprintf(stderr, "No entry point '%s'.  Select another with --entry-point.  Options are:\n", entry_point);
-            for (int i = 0; i < num_entry_points; i++)
-                fprintf(stderr, "%s\n", entry_points[i].name);
-            return 1;
-        }
-        if (isatty(fileno(stdin))) {
-            fprintf(stderr, "Reading input from TTY.\n");
-            fprintf(stderr, "Send EOF (CTRL-d) after typing all input values.\n");
-        }
-        retval = entry_point_fun(ctx);
-        if (runtime_file != NULL)
-            fclose(runtime_file);
-    }
+        futhark_panic(1, "Error during context initialisation:\n%s", error);
+    if (entry_point != NULL)
+        run_server(&prog, cfg, ctx);
     futhark_context_free(ctx);
     futhark_context_config_free(cfg);
-    return retval;
 }
 
 #ifdef _MSC_VER
@@ -6258,7 +7107,7 @@ struct memblock {
 struct constants {
     int dummy;
 };
-static int64_t mainzistatic_array_realtype_8681[4] = { (int64_t) 2,(int64_t) 3,(int64_t) 5,(int64_t) 7};
+static int64_t mainzistatic_array_realtype_8921[4] = { (int64_t) 2,(int64_t) 3,(int64_t) 5,(int64_t) 7};
 struct tuning_params {
     int dummy;
 };
@@ -6930,7 +7779,7 @@ GEN_LMAD_COPY(8b, uint64_t)
 
 #define FUTHARK_FUN_ATTR static
 
-FUTHARK_FUN_ATTR int futrts_entry_main(struct futhark_context *ctx, struct memblock *mem_out_p_8666, int64_t *out_prim_out_8667, int64_t n_7520);
+FUTHARK_FUN_ATTR int futrts_entry_main(struct futhark_context *ctx, struct memblock *mem_out_p_8908, int64_t *out_prim_out_8909, int64_t n_7662);
 
 static int init_constants(struct futhark_context *ctx)
 {
@@ -7033,588 +7882,687 @@ const int64_t *futhark_shape_i64_1d(struct futhark_context *ctx, struct futhark_
     return arr->shape;
 }
 
-FUTHARK_FUN_ATTR int futrts_entry_main(struct futhark_context *ctx, struct memblock *mem_out_p_8666, int64_t *out_prim_out_8667, int64_t n_7520)
+FUTHARK_FUN_ATTR int futrts_entry_main(struct futhark_context *ctx, struct memblock *mem_out_p_8908, int64_t *out_prim_out_8909, int64_t n_7662)
 {
     (void) ctx;
     
     int err = 0;
-    int64_t mem_8508_cached_sizze_8668 = 0;
-    unsigned char *mem_8508 = NULL;
-    int64_t mem_8510_cached_sizze_8669 = 0;
-    unsigned char *mem_8510 = NULL;
-    int64_t mem_8512_cached_sizze_8670 = 0;
-    unsigned char *mem_8512 = NULL;
-    int64_t mem_8532_cached_sizze_8671 = 0;
-    unsigned char *mem_8532 = NULL;
-    int64_t mem_8534_cached_sizze_8672 = 0;
-    unsigned char *mem_8534 = NULL;
-    int64_t mem_8548_cached_sizze_8673 = 0;
-    unsigned char *mem_8548 = NULL;
-    int64_t mem_8550_cached_sizze_8674 = 0;
-    unsigned char *mem_8550 = NULL;
-    int64_t mem_8552_cached_sizze_8675 = 0;
-    unsigned char *mem_8552 = NULL;
-    int64_t mem_8572_cached_sizze_8676 = 0;
-    unsigned char *mem_8572 = NULL;
-    int64_t mem_8579_cached_sizze_8677 = 0;
-    unsigned char *mem_8579 = NULL;
-    int64_t mem_8587_cached_sizze_8678 = 0;
-    unsigned char *mem_8587 = NULL;
-    int64_t mem_8601_cached_sizze_8679 = 0;
-    unsigned char *mem_8601 = NULL;
-    int64_t mem_8603_cached_sizze_8680 = 0;
-    unsigned char *mem_8603 = NULL;
-    struct memblock mem_8628;
+    int64_t mem_8768_cached_sizze_8910 = 0;
+    unsigned char *mem_8768 = NULL;
+    int64_t mem_8776_cached_sizze_8911 = 0;
+    unsigned char *mem_8776 = NULL;
+    int64_t mem_8778_cached_sizze_8912 = 0;
+    unsigned char *mem_8778 = NULL;
+    int64_t mem_8792_cached_sizze_8913 = 0;
+    unsigned char *mem_8792 = NULL;
+    int64_t mem_8794_cached_sizze_8914 = 0;
+    unsigned char *mem_8794 = NULL;
+    int64_t mem_8796_cached_sizze_8915 = 0;
+    unsigned char *mem_8796 = NULL;
+    int64_t mem_8816_cached_sizze_8916 = 0;
+    unsigned char *mem_8816 = NULL;
+    int64_t mem_8823_cached_sizze_8917 = 0;
+    unsigned char *mem_8823 = NULL;
+    int64_t mem_8831_cached_sizze_8918 = 0;
+    unsigned char *mem_8831 = NULL;
+    int64_t mem_8845_cached_sizze_8919 = 0;
+    unsigned char *mem_8845 = NULL;
+    int64_t mem_8847_cached_sizze_8920 = 0;
+    unsigned char *mem_8847 = NULL;
+    struct memblock mem_8872;
     
-    mem_8628.references = NULL;
+    mem_8872.references = NULL;
     
-    struct memblock mem_param_tmp_8633;
+    struct memblock mem_param_tmp_8877;
     
-    mem_param_tmp_8633.references = NULL;
+    mem_param_tmp_8877.references = NULL;
     
-    struct memblock mem_8617;
+    struct memblock mem_8861;
     
-    mem_8617.references = NULL;
+    mem_8861.references = NULL;
     
-    struct memblock mem_param_8506;
+    struct memblock mem_param_8766;
     
-    mem_param_8506.references = NULL;
+    mem_param_8766.references = NULL;
     
-    struct memblock ext_mem_8626;
+    struct memblock ext_mem_8870;
     
-    ext_mem_8626.references = NULL;
+    ext_mem_8870.references = NULL;
     
-    struct memblock mem_8503;
+    struct memblock mem_8763;
     
-    mem_8503.references = NULL;
+    mem_8763.references = NULL;
     
-    struct memblock mem_out_8630;
+    struct memblock mem_out_8874;
     
-    mem_out_8630.references = NULL;
+    mem_out_8874.references = NULL;
     
-    int64_t prim_out_8631;
+    int64_t prim_out_8875;
     
-    if (memblock_alloc(ctx, &mem_8503, (int64_t) 32, "mem_8503")) {
+    if (memblock_alloc(ctx, &mem_8763, (int64_t) 32, "mem_8763")) {
         err = 1;
         goto cleanup;
     }
     
-    struct memblock mainzistatic_array_8632 = (struct memblock) {NULL, (unsigned char *) mainzistatic_array_realtype_8681, 0, "main.static_array_8632"};
+    struct memblock mainzistatic_array_8876 = (struct memblock) {NULL, (unsigned char *) mainzistatic_array_realtype_8921, 0, "main.static_array_8876"};
     
-    lmad_copy_8b(ctx, 1, (uint64_t *) mem_8503.mem, (int64_t) 0, (int64_t []) {(int64_t) 1}, (uint64_t *) mainzistatic_array_8632.mem, (int64_t) 0, (int64_t []) {(int64_t) 1}, (int64_t []) {(int64_t) 4});
+    lmad_copy_8b(ctx, 1, (uint64_t *) mem_8763.mem, (int64_t) 0, (int64_t []) {(int64_t) 1}, (uint64_t *) mainzistatic_array_8876.mem, (int64_t) 0, (int64_t []) {(int64_t) 1}, (int64_t []) {(int64_t) 4});
     
-    bool loop_cond_8032 = slt64((int64_t) 8, n_7520);
-    int64_t ext_8625;
-    int64_t ext_8624;
-    int64_t sq_primes_8033;
-    bool sq_primes_8034;
-    int64_t sq_primes_8036;
-    int64_t loop_dz2081U_8037;
-    bool loop_while_8038;
-    int64_t len_8040;
-    int64_t ctx_param_ext_8504;
-    int64_t ctx_param_ext_8505;
+    bool loop_cond_8258 = slt64((int64_t) 8, n_7662);
+    int64_t ext_8869;
+    int64_t ext_8868;
+    int64_t sq_primes_8259;
+    bool sq_primes_8260;
+    int64_t sq_primes_8262;
+    int64_t loop_dz2081U_8263;
+    bool loop_while_8264;
+    int64_t len_8266;
+    int64_t ctx_param_ext_8764;
+    int64_t ctx_param_ext_8765;
     
-    if (memblock_set(ctx, &mem_param_8506, &mem_8503, "mem_8503") != 0)
+    if (memblock_set(ctx, &mem_param_8766, &mem_8763, "mem_8763") != 0)
         return 1;
-    ctx_param_ext_8504 = (int64_t) 0;
-    ctx_param_ext_8505 = (int64_t) 1;
-    loop_dz2081U_8037 = (int64_t) 4;
-    loop_while_8038 = loop_cond_8032;
-    len_8040 = (int64_t) 8;
-    while (loop_while_8038) {
-        bool zzero_8041 = len_8040 == (int64_t) 0;
-        bool nonzzero_8042 = !zzero_8041;
-        bool nonzzero_cert_8043;
+    ctx_param_ext_8764 = (int64_t) 0;
+    ctx_param_ext_8765 = (int64_t) 1;
+    loop_dz2081U_8263 = (int64_t) 4;
+    loop_while_8264 = loop_cond_8258;
+    len_8266 = (int64_t) 8;
+    while (loop_while_8264) {
+        bool zzero_8267 = len_8266 == (int64_t) 0;
+        bool nonzzero_8268 = !zzero_8267;
+        bool nonzzero_cert_8269;
         
-        if (!nonzzero_8042) {
-            set_error(ctx, msgprintf("Error: %s\n\nBacktrace:\n%s", "division by zero", "-> #0  primes-flat.fut:69:22-27\n   #1  primes-flat.fut:122:30-42\n   #2  primes-flat.fut:122:1-42\n"));
+        if (!nonzzero_8268) {
+            set_error(ctx, msgprintf("Error: %s\n\nBacktrace:\n%s", "division by zero", "-> #0  primes-flat.fut:64:22-27\n   #1  primes-flat.fut:118:30-42\n   #2  primes-flat.fut:118:1-42\n"));
             err = FUTHARK_PROGRAM_ERROR;
             goto cleanup;
         }
         
-        int64_t zl_lhs_8044 = sdiv64(n_7520, len_8040);
-        bool cond_8045 = slt64(zl_lhs_8044, len_8040);
-        int64_t len_f_res_8046 = mul64(len_8040, len_8040);
-        int64_t len_8047;
+        int64_t zl_lhs_8270 = sdiv64(n_7662, len_8266);
+        bool cond_8271 = slt64(zl_lhs_8270, len_8266);
+        int64_t len_f_res_8272 = mul64(len_8266, len_8266);
+        int64_t len_8273;
         
-        if (cond_8045) {
-            len_8047 = n_7520;
+        if (cond_8271) {
+            len_8273 = n_7662;
         } else {
-            len_8047 = len_f_res_8046;
+            len_8273 = len_f_res_8272;
         }
         
-        int64_t dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8048 = add64((int64_t) 1, len_8047);
-        int64_t bytes_8507 = (int64_t) 8 * loop_dz2081U_8037;
+        int64_t dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8274 = add64((int64_t) 1, len_8273);
+        int64_t bytes_8767 = (int64_t) 8 * loop_dz2081U_8263;
         
-        if (mem_8508_cached_sizze_8668 < bytes_8507) {
-            err = lexical_realloc(ctx, &mem_8508, &mem_8508_cached_sizze_8668, bytes_8507);
-            if (err != FUTHARK_SUCCESS)
-                goto cleanup;
-        }
-        if (mem_8510_cached_sizze_8669 < bytes_8507) {
-            err = lexical_realloc(ctx, &mem_8510, &mem_8510_cached_sizze_8669, bytes_8507);
-            if (err != FUTHARK_SUCCESS)
-                goto cleanup;
-        }
-        if (mem_8512_cached_sizze_8670 < bytes_8507) {
-            err = lexical_realloc(ctx, &mem_8512, &mem_8512_cached_sizze_8670, bytes_8507);
+        if (mem_8768_cached_sizze_8910 < bytes_8767) {
+            err = lexical_realloc(ctx, &mem_8768, &mem_8768_cached_sizze_8910, bytes_8767);
             if (err != FUTHARK_SUCCESS)
                 goto cleanup;
         }
         
-        int64_t discard_8427;
-        int64_t discard_8428;
-        int64_t defunc_0_reduce_res_8396;
-        int64_t scanacc_8417;
-        int64_t scanacc_8418;
-        int64_t redout_8421;
+        int64_t defunc_0_reduce_res_8663;
+        int64_t redout_8682 = (int64_t) 0;
         
-        scanacc_8417 = (int64_t) 0;
-        scanacc_8418 = (int64_t) 0;
-        redout_8421 = (int64_t) 0;
-        for (int64_t i_8423 = 0; i_8423 < loop_dz2081U_8037; i_8423++) {
-            int64_t eta_p_8302 = ((int64_t *) mem_param_8506.mem)[ctx_param_ext_8504 + i_8423 * ctx_param_ext_8505];
-            bool zzero_8303 = eta_p_8302 == (int64_t) 0;
-            bool nonzzero_8304 = !zzero_8303;
-            bool nonzzero_cert_8305;
+        for (int64_t i_8684 = 0; i_8684 < loop_dz2081U_8263; i_8684++) {
+            int64_t eta_p_8568 = ((int64_t *) mem_param_8766.mem)[ctx_param_ext_8764 + i_8684 * ctx_param_ext_8765];
+            bool zzero_8569 = eta_p_8568 == (int64_t) 0;
+            bool nonzzero_8570 = !zzero_8569;
+            bool nonzzero_cert_8571;
             
-            if (!nonzzero_8304) {
-                set_error(ctx, msgprintf("Error: %s\n\nBacktrace:\n%s", "division by zero", "-> #0  primes-flat.fut:71:40-43\n   #1  primes-flat.fut:71:51-60\n   #2  primes-flat.fut:122:30-42\n   #3  primes-flat.fut:122:1-42\n"));
+            if (!nonzzero_8570) {
+                set_error(ctx, msgprintf("Error: %s\n\nBacktrace:\n%s", "division by zero", "-> #0  primes-flat.fut:66:40-43\n   #1  primes-flat.fut:66:51-60\n   #2  primes-flat.fut:118:30-42\n   #3  primes-flat.fut:118:1-42\n"));
                 err = FUTHARK_PROGRAM_ERROR;
                 goto cleanup;
             }
             
-            int64_t zm_lhs_8306 = sdiv64(len_8047, eta_p_8302);
-            int64_t lifted_lambda_res_8307 = sub64(zm_lhs_8306, (int64_t) 1);
-            int64_t defunc_0_op_res_8113 = add64(lifted_lambda_res_8307, scanacc_8417);
-            int64_t defunc_0_op_res_8064 = add64(lifted_lambda_res_8307, scanacc_8418);
-            int64_t defunc_0_op_res_8059 = add64(lifted_lambda_res_8307, redout_8421);
+            int64_t zm_lhs_8572 = sdiv64(len_8273, eta_p_8568);
+            int64_t lifted_lambda_res_8573 = sub64(zm_lhs_8572, (int64_t) 1);
+            int64_t defunc_0_op_res_8285 = add64(lifted_lambda_res_8573, redout_8682);
             
-            ((int64_t *) mem_8508)[i_8423] = defunc_0_op_res_8113;
-            ((int64_t *) mem_8510)[i_8423] = defunc_0_op_res_8064;
-            ((int64_t *) mem_8512)[i_8423] = lifted_lambda_res_8307;
+            ((int64_t *) mem_8768)[i_8684] = lifted_lambda_res_8573;
             
-            int64_t scanacc_tmp_8640 = defunc_0_op_res_8113;
-            int64_t scanacc_tmp_8641 = defunc_0_op_res_8064;
-            int64_t redout_tmp_8644 = defunc_0_op_res_8059;
+            int64_t redout_tmp_8884 = defunc_0_op_res_8285;
             
-            scanacc_8417 = scanacc_tmp_8640;
-            scanacc_8418 = scanacc_tmp_8641;
-            redout_8421 = redout_tmp_8644;
+            redout_8682 = redout_tmp_8884;
         }
-        discard_8427 = scanacc_8417;
-        discard_8428 = scanacc_8418;
-        defunc_0_reduce_res_8396 = redout_8421;
-        if (mem_8532_cached_sizze_8671 < bytes_8507) {
-            err = lexical_realloc(ctx, &mem_8532, &mem_8532_cached_sizze_8671, bytes_8507);
+        defunc_0_reduce_res_8663 = redout_8682;
+        if (mem_8776_cached_sizze_8911 < bytes_8767) {
+            err = lexical_realloc(ctx, &mem_8776, &mem_8776_cached_sizze_8911, bytes_8767);
             if (err != FUTHARK_SUCCESS)
                 goto cleanup;
         }
-        if (mem_8534_cached_sizze_8672 < bytes_8507) {
-            err = lexical_realloc(ctx, &mem_8534, &mem_8534_cached_sizze_8672, bytes_8507);
+        if (mem_8778_cached_sizze_8912 < bytes_8767) {
+            err = lexical_realloc(ctx, &mem_8778, &mem_8778_cached_sizze_8912, bytes_8767);
             if (err != FUTHARK_SUCCESS)
                 goto cleanup;
         }
-        for (int64_t i_8433 = 0; i_8433 < loop_dz2081U_8037; i_8433++) {
-            int64_t zv_lhs_8315 = add64((int64_t) -1, i_8433);
-            int64_t tmp_8316 = smod64(zv_lhs_8315, loop_dz2081U_8037);
-            int64_t lifted_lambda_res_8317 = ((int64_t *) mem_8510)[tmp_8316];
-            bool cond_8319 = i_8433 == (int64_t) 0;
-            int64_t lifted_lambda_res_8320;
+        
+        int64_t discard_8695;
+        int64_t discard_8696;
+        int64_t scanacc_8688;
+        int64_t scanacc_8689;
+        
+        scanacc_8688 = (int64_t) 0;
+        scanacc_8689 = (int64_t) 0;
+        for (int64_t i_8692 = 0; i_8692 < loop_dz2081U_8263; i_8692++) {
+            bool cond_8578 = i_8692 == (int64_t) 0;
+            int64_t lifted_lambda_res_8579;
             
-            if (cond_8319) {
-                lifted_lambda_res_8320 = (int64_t) 0;
+            if (cond_8578) {
+                lifted_lambda_res_8579 = (int64_t) 0;
             } else {
-                lifted_lambda_res_8320 = lifted_lambda_res_8317;
-            }
-            
-            int64_t lifted_lambda_res_8325 = ((int64_t *) mem_8508)[tmp_8316];
-            int64_t lifted_lambda_res_8328;
-            
-            if (cond_8319) {
-                lifted_lambda_res_8328 = (int64_t) 0;
-            } else {
-                lifted_lambda_res_8328 = lifted_lambda_res_8325;
-            }
-            ((int64_t *) mem_8532)[i_8433] = lifted_lambda_res_8328;
-            ((int64_t *) mem_8534)[i_8433] = lifted_lambda_res_8320;
-        }
-        
-        int64_t tmp_8077 = sub64(loop_dz2081U_8037, (int64_t) 1);
-        bool x_8078 = sle64((int64_t) 0, tmp_8077);
-        bool y_8079 = slt64(tmp_8077, loop_dz2081U_8037);
-        bool bounds_check_8080 = x_8078 && y_8079;
-        bool index_certs_8081;
-        
-        if (!bounds_check_8080) {
-            set_error(ctx, msgprintf("Error: %s%lld%s%lld%s\n\nBacktrace:\n%s", "Index [", (long long) tmp_8077, "] out of bounds for array of shape [", (long long) loop_dz2081U_8037, "].", "-> #0  /prelude/array.fut:28:29-35\n   #1  primes-flat.fut:48:17-26\n   #2  primes-flat.fut:122:30-42\n   #3  primes-flat.fut:122:1-42\n"));
-            err = FUTHARK_PROGRAM_ERROR;
-            goto cleanup;
-        }
-        
-        int64_t last_res_8082 = ((int64_t *) mem_8534)[tmp_8077];
-        int64_t last_res_8083 = ((int64_t *) mem_8512)[tmp_8077];
-        int64_t sizze_8084 = add64(last_res_8082, last_res_8083);
-        int64_t bytes_8547 = (int64_t) 8 * sizze_8084;
-        
-        if (mem_8548_cached_sizze_8673 < bytes_8547) {
-            err = lexical_realloc(ctx, &mem_8548, &mem_8548_cached_sizze_8673, bytes_8547);
-            if (err != FUTHARK_SUCCESS)
-                goto cleanup;
-        }
-        for (int64_t nest_i_8648 = 0; nest_i_8648 < sizze_8084; nest_i_8648++) {
-            ((int64_t *) mem_8548)[nest_i_8648] = (int64_t) 0;
-        }
-        
-        int64_t last_res_8125 = ((int64_t *) mem_8532)[tmp_8077];
-        int64_t sizze_8126 = add64(last_res_8083, last_res_8125);
-        int64_t bytes_8549 = (int64_t) 8 * sizze_8126;
-        
-        if (mem_8550_cached_sizze_8674 < bytes_8549) {
-            err = lexical_realloc(ctx, &mem_8550, &mem_8550_cached_sizze_8674, bytes_8549);
-            if (err != FUTHARK_SUCCESS)
-                goto cleanup;
-        }
-        for (int64_t nest_i_8649 = 0; nest_i_8649 < sizze_8126; nest_i_8649++) {
-            ((int64_t *) mem_8550)[nest_i_8649] = (int64_t) 0;
-        }
-        if (mem_8552_cached_sizze_8675 < bytes_8549) {
-            err = lexical_realloc(ctx, &mem_8552, &mem_8552_cached_sizze_8675, bytes_8549);
-            if (err != FUTHARK_SUCCESS)
-                goto cleanup;
-        }
-        for (int64_t nest_i_8650 = 0; nest_i_8650 < sizze_8126; nest_i_8650++) {
-            ((int64_t *) mem_8552)[nest_i_8650] = (int64_t) 0;
-        }
-        for (int64_t write_iter_8436 = 0; write_iter_8436 < loop_dz2081U_8037; write_iter_8436++) {
-            int64_t write_iv_8440 = ((int64_t *) mem_8532)[write_iter_8436];
-            int64_t write_iv_8441 = ((int64_t *) mem_param_8506.mem)[ctx_param_ext_8504 + write_iter_8436 * ctx_param_ext_8505];
-            int64_t write_iv_8443 = ((int64_t *) mem_8512)[write_iter_8436];
-            int64_t write_iv_8444 = ((int64_t *) mem_8534)[write_iter_8436];
-            
-            if (sle64((int64_t) 0, write_iv_8440) && slt64(write_iv_8440, sizze_8126)) {
-                ((int64_t *) mem_8550)[write_iv_8440] = write_iv_8441;
-            }
-            if (sle64((int64_t) 0, write_iv_8440) && slt64(write_iv_8440, sizze_8126)) {
-                ((int64_t *) mem_8552)[write_iv_8440] = write_iv_8443;
-            }
-            if (sle64((int64_t) 0, write_iv_8444) && slt64(write_iv_8444, sizze_8084)) {
-                ((int64_t *) mem_8548)[write_iv_8444] = write_iv_8443;
-            }
-        }
-        if (mem_8572_cached_sizze_8676 < bytes_8547) {
-            err = lexical_realloc(ctx, &mem_8572, &mem_8572_cached_sizze_8676, bytes_8547);
-            if (err != FUTHARK_SUCCESS)
-                goto cleanup;
-        }
-        
-        int64_t discard_8459;
-        int64_t scanacc_8452 = (int64_t) 0;
-        
-        for (int64_t i_8455 = 0; i_8455 < sizze_8084; i_8455++) {
-            int64_t eta_p_8268 = ((int64_t *) mem_8548)[i_8455];
-            bool lifted_lambda_res_8270 = slt64((int64_t) 0, eta_p_8268);
-            int64_t vl_8100;
-            
-            if (lifted_lambda_res_8270) {
-                vl_8100 = (int64_t) 1;
-            } else {
-                int64_t defunc_0_op_res_8101 = add64((int64_t) 1, scanacc_8452);
+                int64_t tmp_8580 = sub64(i_8692, (int64_t) 1);
+                bool x_8581 = sle64((int64_t) 0, tmp_8580);
+                bool y_8582 = slt64(tmp_8580, loop_dz2081U_8263);
+                bool bounds_check_8583 = x_8581 && y_8582;
+                bool index_certs_8584;
                 
-                vl_8100 = defunc_0_op_res_8101;
-            }
-            ((int64_t *) mem_8572)[i_8455] = vl_8100;
-            
-            int64_t scanacc_tmp_8654 = vl_8100;
-            
-            scanacc_8452 = scanacc_tmp_8654;
-        }
-        discard_8459 = scanacc_8452;
-        
-        bool bounds_invalid_upwards_8156 = slt64(dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8048, (int64_t) 0);
-        bool valid_8157 = !bounds_invalid_upwards_8156;
-        bool range_valid_c_8158;
-        
-        if (!valid_8157) {
-            set_error(ctx, msgprintf("Error: %s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s", "Range ", (long long) (int64_t) 0, "..", (long long) (int64_t) 1, "..<", (long long) dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8048, " is invalid.", "-> #0  /prelude/array.fut:94:3-11\n   #1  primes-flat.fut:108:66-77\n   #2  primes-flat.fut:122:30-42\n   #3  primes-flat.fut:122:1-42\n"));
-            err = FUTHARK_PROGRAM_ERROR;
-            goto cleanup;
-        }
-        if (mem_8579_cached_sizze_8677 < dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8048) {
-            err = lexical_realloc(ctx, &mem_8579, &mem_8579_cached_sizze_8677, dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8048);
-            if (err != FUTHARK_SUCCESS)
-                goto cleanup;
-        }
-        for (int64_t i_8462 = 0; i_8462 < dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8048; i_8462++) {
-            bool cond_8162 = slt64((int64_t) 1, i_8462);
-            int8_t lifted_lambda_res_8163 = btoi_bool_i8(cond_8162);
-            
-            ((int8_t *) mem_8579)[i_8462] = lifted_lambda_res_8163;
-        }
-        
-        bool dim_match_8149 = defunc_0_reduce_res_8396 == sizze_8126;
-        bool empty_or_match_cert_8150;
-        
-        if (!dim_match_8149) {
-            set_error(ctx, msgprintf("Error: %s%lld%s%lld%s\n\nBacktrace:\n%s", "Value of (core language) shape (", (long long) sizze_8126, ") cannot match shape of type `[", (long long) defunc_0_reduce_res_8396, "]i64`.", "-> #0  primes-flat.fut:94:30-90\n   #1  primes-flat.fut:122:30-42\n   #2  primes-flat.fut:122:1-42\n"));
-            err = FUTHARK_PROGRAM_ERROR;
-            goto cleanup;
-        }
-        if (mem_8587_cached_sizze_8678 < bytes_8549) {
-            err = lexical_realloc(ctx, &mem_8587, &mem_8587_cached_sizze_8678, bytes_8549);
-            if (err != FUTHARK_SUCCESS)
-                goto cleanup;
-        }
-        
-        int64_t discard_8474;
-        int64_t scanacc_8467 = (int64_t) 0;
-        
-        for (int64_t i_8470 = 0; i_8470 < sizze_8126; i_8470++) {
-            int64_t eta_p_8247 = ((int64_t *) mem_8552)[i_8470];
-            int64_t x_8248 = ((int64_t *) mem_8550)[i_8470];
-            bool lifted_lambda_res_8249 = slt64((int64_t) 0, eta_p_8247);
-            int64_t vl_8145;
-            
-            if (lifted_lambda_res_8249) {
-                vl_8145 = x_8248;
-            } else {
-                int64_t defunc_0_op_res_8146 = add64(x_8248, scanacc_8467);
+                if (!bounds_check_8583) {
+                    set_error(ctx, msgprintf("Error: %s%lld%s%lld%s\n\nBacktrace:\n%s", "Index [", (long long) tmp_8580, "] out of bounds for array of shape [", (long long) loop_dz2081U_8263, "].", "-> #0  primes-flat.fut:15:31-43\n   #1  primes-flat.fut:16:24-30\n   #2  primes-flat.fut:118:30-42\n   #3  primes-flat.fut:118:1-42\n"));
+                    err = FUTHARK_PROGRAM_ERROR;
+                    goto cleanup;
+                }
                 
-                vl_8145 = defunc_0_op_res_8146;
-            }
-            ((int64_t *) mem_8587)[i_8470] = vl_8145;
-            
-            int64_t scanacc_tmp_8657 = vl_8145;
-            
-            scanacc_8467 = scanacc_tmp_8657;
-        }
-        discard_8474 = scanacc_8467;
-        
-        bool dim_match_8107 = defunc_0_reduce_res_8396 == sizze_8084;
-        bool empty_or_match_cert_8108;
-        
-        if (!dim_match_8107) {
-            set_error(ctx, msgprintf("Error: %s%lld%s%lld%s\n\nBacktrace:\n%s", "Value of (core language) shape (", (long long) sizze_8084, ") cannot match shape of type `[", (long long) defunc_0_reduce_res_8396, "]i64`.", "-> #0  primes-flat.fut:93:19-72\n   #1  primes-flat.fut:122:30-42\n   #2  primes-flat.fut:122:1-42\n"));
-            err = FUTHARK_PROGRAM_ERROR;
-            goto cleanup;
-        }
-        for (int64_t write_iter_8475 = 0; write_iter_8475 < defunc_0_reduce_res_8396; write_iter_8475++) {
-            int64_t write_iv_8477 = ((int64_t *) mem_8572)[write_iter_8475];
-            int64_t write_iv_8478 = ((int64_t *) mem_8587)[write_iter_8475];
-            int64_t lifted_lambda_res_8263 = add64((int64_t) 2, write_iv_8477);
-            int64_t lifted_lambda_res_8265 = mul64(lifted_lambda_res_8263, write_iv_8478);
-            
-            if (sle64((int64_t) 0, lifted_lambda_res_8265) && slt64(lifted_lambda_res_8265, dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8048)) {
-                ((int8_t *) mem_8579)[lifted_lambda_res_8265] = (int8_t) 0;
-            }
-        }
-        
-        bool bounds_invalid_upwards_8166 = slt64(len_8047, (int64_t) 0);
-        bool valid_8167 = !bounds_invalid_upwards_8166;
-        bool range_valid_c_8168;
-        
-        if (!valid_8167) {
-            set_error(ctx, msgprintf("Error: %s%lld%s%lld%s\n\nBacktrace:\n%s", "Range ", (long long) (int64_t) 0, "...", (long long) len_8047, " is invalid.", "-> #0  primes-flat.fut:111:32-39\n   #1  primes-flat.fut:122:30-42\n   #2  primes-flat.fut:122:1-42\n"));
-            err = FUTHARK_PROGRAM_ERROR;
-            goto cleanup;
-        }
-        
-        int64_t bytes_8600 = (int64_t) 8 * dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8048;
-        
-        if (mem_8601_cached_sizze_8679 < bytes_8600) {
-            err = lexical_realloc(ctx, &mem_8601, &mem_8601_cached_sizze_8679, bytes_8600);
-            if (err != FUTHARK_SUCCESS)
-                goto cleanup;
-        }
-        if (mem_8603_cached_sizze_8680 < bytes_8600) {
-            err = lexical_realloc(ctx, &mem_8603, &mem_8603_cached_sizze_8680, bytes_8600);
-            if (err != FUTHARK_SUCCESS)
-                goto cleanup;
-        }
-        
-        int64_t discard_8488;
-        int64_t scanacc_8482 = (int64_t) 0;
-        
-        for (int64_t i_8485 = 0; i_8485 < dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8048; i_8485++) {
-            bool cond_8229 = slt64((int64_t) 1, i_8485);
-            bool cond_t_res_8230 = sle64(i_8485, n_7520);
-            bool x_8231 = cond_8229 && cond_t_res_8230;
-            bool lifted_lambda_res_8232;
-            
-            if (x_8231) {
-                int8_t zg_lhs_8390 = ((int8_t *) mem_8579)[i_8485];
-                bool lifted_lambda_res_t_res_8391 = slt8((int8_t) 0, zg_lhs_8390);
+                int64_t lifted_lambda_res_f_res_8585 = ((int64_t *) mem_8768)[tmp_8580];
                 
-                lifted_lambda_res_8232 = lifted_lambda_res_t_res_8391;
-            } else {
-                lifted_lambda_res_8232 = 0;
+                lifted_lambda_res_8579 = lifted_lambda_res_f_res_8585;
             }
             
-            int64_t defunc_0_f_res_8239 = btoi_bool_i64(lifted_lambda_res_8232);
-            int64_t defunc_0_op_res_8185 = add64(defunc_0_f_res_8239, scanacc_8482);
+            int64_t lifted_lambda_res_8588;
             
-            ((int64_t *) mem_8601)[i_8485] = defunc_0_op_res_8185;
-            ((int64_t *) mem_8603)[i_8485] = defunc_0_f_res_8239;
+            if (cond_8578) {
+                lifted_lambda_res_8588 = (int64_t) 0;
+            } else {
+                int64_t tmp_8589 = sub64(i_8692, (int64_t) 1);
+                bool x_8590 = sle64((int64_t) 0, tmp_8589);
+                bool y_8591 = slt64(tmp_8589, loop_dz2081U_8263);
+                bool bounds_check_8592 = x_8590 && y_8591;
+                bool index_certs_8593;
+                
+                if (!bounds_check_8592) {
+                    set_error(ctx, msgprintf("Error: %s%lld%s%lld%s\n\nBacktrace:\n%s", "Index [", (long long) tmp_8589, "] out of bounds for array of shape [", (long long) loop_dz2081U_8263, "].", "-> #0  primes-flat.fut:15:31-43\n   #1  primes-flat.fut:16:24-30\n   #2  primes-flat.fut:53:8-19\n   #3  /prelude/functional.fut:9:44-45\n   #4  primes-flat.fut:118:30-42\n   #5  primes-flat.fut:118:1-42\n"));
+                    err = FUTHARK_PROGRAM_ERROR;
+                    goto cleanup;
+                }
+                
+                int64_t lifted_lambda_res_f_res_8594 = ((int64_t *) mem_8768)[tmp_8589];
+                
+                lifted_lambda_res_8588 = lifted_lambda_res_f_res_8594;
+            }
             
-            int64_t scanacc_tmp_8660 = defunc_0_op_res_8185;
+            int64_t defunc_0_op_res_8302 = add64(lifted_lambda_res_8579, scanacc_8688);
+            int64_t defunc_0_op_res_8364 = add64(lifted_lambda_res_8588, scanacc_8689);
             
-            scanacc_8482 = scanacc_tmp_8660;
+            ((int64_t *) mem_8776)[i_8692] = defunc_0_op_res_8302;
+            ((int64_t *) mem_8778)[i_8692] = defunc_0_op_res_8364;
+            
+            int64_t scanacc_tmp_8886 = defunc_0_op_res_8302;
+            int64_t scanacc_tmp_8887 = defunc_0_op_res_8364;
+            
+            scanacc_8688 = scanacc_tmp_8886;
+            scanacc_8689 = scanacc_tmp_8887;
         }
-        discard_8488 = scanacc_8482;
+        discard_8695 = scanacc_8688;
+        discard_8696 = scanacc_8689;
         
-        bool cond_8187 = dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8048 == (int64_t) 0;
-        bool x_8188 = !cond_8187;
-        bool x_8189 = sle64((int64_t) 0, len_8047);
-        bool y_8190 = slt64(len_8047, dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8048);
-        bool bounds_check_8191 = x_8189 && y_8190;
-        bool protect_assert_disj_8192 = cond_8187 || bounds_check_8191;
-        bool index_certs_8193;
+        bool cond_8304 = loop_dz2081U_8263 == (int64_t) 0;
+        bool x_8305 = !cond_8304;
+        int64_t zp_lhs_8306 = sub64(loop_dz2081U_8263, (int64_t) 1);
+        bool x_8307 = sle64((int64_t) 0, zp_lhs_8306);
+        bool y_8308 = slt64(zp_lhs_8306, loop_dz2081U_8263);
+        bool bounds_check_8309 = x_8307 && y_8308;
+        bool protect_assert_disj_8310 = cond_8304 || bounds_check_8309;
+        bool index_certs_8311;
         
-        if (!protect_assert_disj_8192) {
-            set_error(ctx, msgprintf("Error: %s%lld%s%lld%s\n\nBacktrace:\n%s", "Index [", (long long) len_8047, "] out of bounds for array of shape [", (long long) dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8048, "].", "-> #0  /prelude/soacs.fut:256:33-45\n   #1  primes-flat.fut:122:30-42\n   #2  primes-flat.fut:122:1-42\n"));
+        if (!protect_assert_disj_8310) {
+            set_error(ctx, msgprintf("Error: %s%lld%s%lld%s\n\nBacktrace:\n%s", "Index [", (long long) zp_lhs_8306, "] out of bounds for array of shape [", (long long) loop_dz2081U_8263, "].", "-> #0  primes-flat.fut:19:22-34\n   #1  primes-flat.fut:118:30-42\n   #2  primes-flat.fut:118:1-42\n"));
             err = FUTHARK_PROGRAM_ERROR;
             goto cleanup;
         }
         
-        int64_t m_f_res_8194;
+        int64_t zp_lhs_8312;
         
-        if (x_8188) {
-            int64_t x_8392 = ((int64_t *) mem_8601)[len_8047];
+        if (x_8305) {
+            int64_t x_8651 = ((int64_t *) mem_8776)[zp_lhs_8306];
             
-            m_f_res_8194 = x_8392;
+            zp_lhs_8312 = x_8651;
         } else {
-            m_f_res_8194 = (int64_t) 0;
+            zp_lhs_8312 = (int64_t) 0;
         }
         
-        int64_t m_8196;
+        int64_t zp_rhs_8314;
         
-        if (cond_8187) {
-            m_8196 = (int64_t) 0;
+        if (x_8305) {
+            int64_t x_8652 = ((int64_t *) mem_8768)[zp_lhs_8306];
+            
+            zp_rhs_8314 = x_8652;
         } else {
-            m_8196 = m_f_res_8194;
+            zp_rhs_8314 = (int64_t) 0;
         }
         
-        int64_t m_8206 = sub64(m_8196, (int64_t) 1);
-        bool i_p_m_t_s_leq_w_8208 = slt64(m_8206, dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8048);
-        bool zzero_leq_i_p_m_t_s_8207 = sle64((int64_t) 0, m_8206);
-        bool y_8210 = zzero_leq_i_p_m_t_s_8207 && i_p_m_t_s_leq_w_8208;
-        bool i_lte_j_8209 = sle64((int64_t) 0, m_8196);
-        bool forwards_ok_8211 = i_lte_j_8209 && y_8210;
-        bool eq_x_zz_8203 = (int64_t) 0 == m_f_res_8194;
-        bool p_and_eq_x_y_8204 = x_8188 && eq_x_zz_8203;
-        bool empty_slice_8205 = cond_8187 || p_and_eq_x_y_8204;
-        bool ok_or_empty_8212 = empty_slice_8205 || forwards_ok_8211;
-        bool index_certs_8213;
+        int64_t aoa_len_f_res_8316 = add64(zp_lhs_8312, zp_rhs_8314);
+        int64_t aoa_len_8317;
         
-        if (!ok_or_empty_8212) {
-            set_error(ctx, msgprintf("Error: %s%lld%s%lld%s\n\nBacktrace:\n%s", "Index [:", (long long) m_8196, "] out of bounds for array of shape [", (long long) dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8048, "].", "-> #0  /prelude/soacs.fut:257:29-35\n   #1  primes-flat.fut:122:30-42\n   #2  primes-flat.fut:122:1-42\n"));
+        if (cond_8304) {
+            aoa_len_8317 = (int64_t) 0;
+        } else {
+            aoa_len_8317 = aoa_len_f_res_8316;
+        }
+        
+        bool index_certs_8373;
+        
+        if (!protect_assert_disj_8310) {
+            set_error(ctx, msgprintf("Error: %s%lld%s%lld%s\n\nBacktrace:\n%s", "Index [", (long long) zp_lhs_8306, "] out of bounds for array of shape [", (long long) loop_dz2081U_8263, "].", "-> #0  primes-flat.fut:19:22-34\n   #1  primes-flat.fut:53:8-19\n   #2  /prelude/functional.fut:9:44-45\n   #3  primes-flat.fut:118:30-42\n   #4  primes-flat.fut:118:1-42\n"));
             err = FUTHARK_PROGRAM_ERROR;
             goto cleanup;
         }
         
-        int64_t bytes_8616 = (int64_t) 8 * m_8196;
+        int64_t zp_rhs_8376;
         
-        if (memblock_alloc(ctx, &mem_8617, bytes_8616, "mem_8617")) {
+        if (x_8305) {
+            int64_t x_8653 = ((int64_t *) mem_8768)[zp_lhs_8306];
+            
+            zp_rhs_8376 = x_8653;
+        } else {
+            zp_rhs_8376 = (int64_t) 0;
+        }
+        
+        int64_t zp_lhs_8374;
+        
+        if (x_8305) {
+            int64_t x_8654 = ((int64_t *) mem_8778)[zp_lhs_8306];
+            
+            zp_lhs_8374 = x_8654;
+        } else {
+            zp_lhs_8374 = (int64_t) 0;
+        }
+        
+        int64_t aoa_len_f_res_8378 = add64(zp_lhs_8374, zp_rhs_8376);
+        int64_t aoa_len_8379;
+        
+        if (cond_8304) {
+            aoa_len_8379 = (int64_t) 0;
+        } else {
+            aoa_len_8379 = aoa_len_f_res_8378;
+        }
+        
+        int64_t bytes_8791 = (int64_t) 8 * aoa_len_8379;
+        
+        if (mem_8792_cached_sizze_8913 < bytes_8791) {
+            err = lexical_realloc(ctx, &mem_8792, &mem_8792_cached_sizze_8913, bytes_8791);
+            if (err != FUTHARK_SUCCESS)
+                goto cleanup;
+        }
+        for (int64_t nest_i_8890 = 0; nest_i_8890 < aoa_len_8379; nest_i_8890++) {
+            ((int64_t *) mem_8792)[nest_i_8890] = (int64_t) 0;
+        }
+        if (mem_8794_cached_sizze_8914 < bytes_8791) {
+            err = lexical_realloc(ctx, &mem_8794, &mem_8794_cached_sizze_8914, bytes_8791);
+            if (err != FUTHARK_SUCCESS)
+                goto cleanup;
+        }
+        for (int64_t nest_i_8891 = 0; nest_i_8891 < aoa_len_8379; nest_i_8891++) {
+            ((int64_t *) mem_8794)[nest_i_8891] = (int64_t) 0;
+        }
+        
+        int64_t bytes_8795 = (int64_t) 8 * aoa_len_8317;
+        
+        if (mem_8796_cached_sizze_8915 < bytes_8795) {
+            err = lexical_realloc(ctx, &mem_8796, &mem_8796_cached_sizze_8915, bytes_8795);
+            if (err != FUTHARK_SUCCESS)
+                goto cleanup;
+        }
+        for (int64_t nest_i_8892 = 0; nest_i_8892 < aoa_len_8317; nest_i_8892++) {
+            ((int64_t *) mem_8796)[nest_i_8892] = (int64_t) 0;
+        }
+        for (int64_t write_iter_8697 = 0; write_iter_8697 < loop_dz2081U_8263; write_iter_8697++) {
+            int64_t write_iv_8701 = ((int64_t *) mem_8768)[write_iter_8697];
+            int64_t write_iv_8702 = ((int64_t *) mem_8778)[write_iter_8697];
+            int64_t write_iv_8703 = ((int64_t *) mem_param_8766.mem)[ctx_param_ext_8764 + write_iter_8697 * ctx_param_ext_8765];
+            int64_t write_iv_8705 = ((int64_t *) mem_8776)[write_iter_8697];
+            bool cond_8602 = write_iv_8701 == (int64_t) 0;
+            int64_t lifted_lambda_res_8603;
+            
+            if (cond_8602) {
+                lifted_lambda_res_8603 = (int64_t) -1;
+            } else {
+                lifted_lambda_res_8603 = write_iv_8705;
+            }
+            
+            int64_t lifted_lambda_res_8607;
+            
+            if (cond_8602) {
+                lifted_lambda_res_8607 = (int64_t) -1;
+            } else {
+                lifted_lambda_res_8607 = write_iv_8702;
+            }
+            if (sle64((int64_t) 0, lifted_lambda_res_8607) && slt64(lifted_lambda_res_8607, aoa_len_8379)) {
+                ((int64_t *) mem_8794)[lifted_lambda_res_8607] = write_iv_8701;
+            }
+            if (sle64((int64_t) 0, lifted_lambda_res_8607) && slt64(lifted_lambda_res_8607, aoa_len_8379)) {
+                ((int64_t *) mem_8792)[lifted_lambda_res_8607] = write_iv_8703;
+            }
+            if (sle64((int64_t) 0, lifted_lambda_res_8603) && slt64(lifted_lambda_res_8603, aoa_len_8317)) {
+                ((int64_t *) mem_8796)[lifted_lambda_res_8603] = (int64_t) 1;
+            }
+        }
+        if (mem_8816_cached_sizze_8916 < bytes_8795) {
+            err = lexical_realloc(ctx, &mem_8816, &mem_8816_cached_sizze_8916, bytes_8795);
+            if (err != FUTHARK_SUCCESS)
+                goto cleanup;
+        }
+        
+        int64_t discard_8719;
+        int64_t scanacc_8712 = (int64_t) 0;
+        
+        for (int64_t i_8715 = 0; i_8715 < aoa_len_8317; i_8715++) {
+            int64_t eta_p_8545 = ((int64_t *) mem_8796)[i_8715];
+            bool cond_8547 = eta_p_8545 == (int64_t) 0;
+            int64_t lifted_lambda_res_8548 = btoi_bool_i64(cond_8547);
+            bool cond_8339 = !cond_8547;
+            int64_t vl_8340;
+            
+            if (cond_8339) {
+                vl_8340 = lifted_lambda_res_8548;
+            } else {
+                int64_t defunc_0_op_res_8341 = add64(lifted_lambda_res_8548, scanacc_8712);
+                
+                vl_8340 = defunc_0_op_res_8341;
+            }
+            ((int64_t *) mem_8816)[i_8715] = vl_8340;
+            
+            int64_t scanacc_tmp_8896 = vl_8340;
+            
+            scanacc_8712 = scanacc_tmp_8896;
+        }
+        discard_8719 = scanacc_8712;
+        
+        bool eq_x_y_8477 = defunc_0_reduce_res_8663 == (int64_t) 0;
+        bool eq_x_zz_8478 = defunc_0_reduce_res_8663 == aoa_len_f_res_8316;
+        bool p_and_eq_x_y_8479 = cond_8304 && eq_x_y_8477;
+        bool p_and_eq_x_y_8481 = x_8305 && eq_x_zz_8478;
+        bool dim_match_8344 = p_and_eq_x_y_8479 || p_and_eq_x_y_8481;
+        bool empty_or_match_cert_8345;
+        
+        if (!dim_match_8344) {
+            set_error(ctx, msgprintf("Error: %s%lld%s%lld%s\n\nBacktrace:\n%s", "Value of (core language) shape (", (long long) aoa_len_8317, ") cannot match shape of type `[", (long long) defunc_0_reduce_res_8663, "]i64`.", "-> #0  primes-flat.fut:88:18-60\n   #1  primes-flat.fut:118:30-42\n   #2  primes-flat.fut:118:1-42\n"));
+            err = FUTHARK_PROGRAM_ERROR;
+            goto cleanup;
+        }
+        
+        bool bounds_invalid_upwards_8412 = slt64(dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8274, (int64_t) 0);
+        bool valid_8413 = !bounds_invalid_upwards_8412;
+        bool range_valid_c_8414;
+        
+        if (!valid_8413) {
+            set_error(ctx, msgprintf("Error: %s%lld%s%lld%s%lld%s\n\nBacktrace:\n%s", "Range ", (long long) (int64_t) 0, "..", (long long) (int64_t) 1, "..<", (long long) dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8274, " is invalid.", "-> #0  /prelude/array.fut:94:3-11\n   #1  primes-flat.fut:104:66-77\n   #2  primes-flat.fut:118:30-42\n   #3  primes-flat.fut:118:1-42\n"));
+            err = FUTHARK_PROGRAM_ERROR;
+            goto cleanup;
+        }
+        if (mem_8823_cached_sizze_8917 < dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8274) {
+            err = lexical_realloc(ctx, &mem_8823, &mem_8823_cached_sizze_8917, dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8274);
+            if (err != FUTHARK_SUCCESS)
+                goto cleanup;
+        }
+        for (int64_t i_8722 = 0; i_8722 < dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8274; i_8722++) {
+            bool cond_8418 = slt64((int64_t) 1, i_8722);
+            int8_t lifted_lambda_res_8419 = btoi_bool_i8(cond_8418);
+            
+            ((int8_t *) mem_8823)[i_8722] = lifted_lambda_res_8419;
+        }
+        
+        bool eq_x_zz_8483 = defunc_0_reduce_res_8663 == aoa_len_f_res_8378;
+        bool p_and_eq_x_y_8486 = x_8305 && eq_x_zz_8483;
+        bool dim_match_8405 = p_and_eq_x_y_8479 || p_and_eq_x_y_8486;
+        bool empty_or_match_cert_8406;
+        
+        if (!dim_match_8405) {
+            set_error(ctx, msgprintf("Error: %s%lld%s%lld%s\n\nBacktrace:\n%s", "Value of (core language) shape (", (long long) aoa_len_8379, ") cannot match shape of type `[", (long long) defunc_0_reduce_res_8663, "]i64`.", "-> #0  primes-flat.fut:90:30-90\n   #1  primes-flat.fut:118:30-42\n   #2  primes-flat.fut:118:1-42\n"));
+            err = FUTHARK_PROGRAM_ERROR;
+            goto cleanup;
+        }
+        if (mem_8831_cached_sizze_8918 < bytes_8791) {
+            err = lexical_realloc(ctx, &mem_8831, &mem_8831_cached_sizze_8918, bytes_8791);
+            if (err != FUTHARK_SUCCESS)
+                goto cleanup;
+        }
+        
+        int64_t discard_8734;
+        int64_t scanacc_8727 = (int64_t) 0;
+        
+        for (int64_t i_8730 = 0; i_8730 < aoa_len_8379; i_8730++) {
+            int64_t x_8403 = ((int64_t *) mem_8794)[i_8730];
+            int64_t x_8404 = ((int64_t *) mem_8792)[i_8730];
+            bool cond_8399 = x_8403 == (int64_t) 0;
+            bool cond_8400 = !cond_8399;
+            int64_t vl_8401;
+            
+            if (cond_8400) {
+                vl_8401 = x_8404;
+            } else {
+                int64_t defunc_0_op_res_8402 = add64(x_8404, scanacc_8727);
+                
+                vl_8401 = defunc_0_op_res_8402;
+            }
+            ((int64_t *) mem_8831)[i_8730] = vl_8401;
+            
+            int64_t scanacc_tmp_8899 = vl_8401;
+            
+            scanacc_8727 = scanacc_tmp_8899;
+        }
+        discard_8734 = scanacc_8727;
+        for (int64_t write_iter_8735 = 0; write_iter_8735 < defunc_0_reduce_res_8663; write_iter_8735++) {
+            int64_t write_iv_8737 = ((int64_t *) mem_8816)[write_iter_8735];
+            int64_t write_iv_8738 = ((int64_t *) mem_8831)[write_iter_8735];
+            int64_t lifted_lambda_res_8540 = add64((int64_t) 2, write_iv_8737);
+            int64_t lifted_lambda_res_8542 = mul64(lifted_lambda_res_8540, write_iv_8738);
+            
+            if (sle64((int64_t) 0, lifted_lambda_res_8542) && slt64(lifted_lambda_res_8542, dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8274)) {
+                ((int8_t *) mem_8823)[lifted_lambda_res_8542] = (int8_t) 0;
+            }
+        }
+        
+        bool bounds_invalid_upwards_8422 = slt64(len_8273, (int64_t) 0);
+        bool valid_8423 = !bounds_invalid_upwards_8422;
+        bool range_valid_c_8424;
+        
+        if (!valid_8423) {
+            set_error(ctx, msgprintf("Error: %s%lld%s%lld%s\n\nBacktrace:\n%s", "Range ", (long long) (int64_t) 0, "...", (long long) len_8273, " is invalid.", "-> #0  primes-flat.fut:107:32-39\n   #1  primes-flat.fut:118:30-42\n   #2  primes-flat.fut:118:1-42\n"));
+            err = FUTHARK_PROGRAM_ERROR;
+            goto cleanup;
+        }
+        
+        int64_t bytes_8844 = (int64_t) 8 * dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8274;
+        
+        if (mem_8845_cached_sizze_8919 < bytes_8844) {
+            err = lexical_realloc(ctx, &mem_8845, &mem_8845_cached_sizze_8919, bytes_8844);
+            if (err != FUTHARK_SUCCESS)
+                goto cleanup;
+        }
+        if (mem_8847_cached_sizze_8920 < bytes_8844) {
+            err = lexical_realloc(ctx, &mem_8847, &mem_8847_cached_sizze_8920, bytes_8844);
+            if (err != FUTHARK_SUCCESS)
+                goto cleanup;
+        }
+        
+        int64_t discard_8748;
+        int64_t scanacc_8742 = (int64_t) 0;
+        
+        for (int64_t i_8745 = 0; i_8745 < dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8274; i_8745++) {
+            bool cond_8501 = slt64((int64_t) 1, i_8745);
+            bool cond_t_res_8502 = sle64(i_8745, n_7662);
+            bool x_8503 = cond_8501 && cond_t_res_8502;
+            bool lifted_lambda_res_8504;
+            
+            if (x_8503) {
+                int8_t zg_lhs_8659 = ((int8_t *) mem_8823)[i_8745];
+                bool lifted_lambda_res_t_res_8660 = slt8((int8_t) 0, zg_lhs_8659);
+                
+                lifted_lambda_res_8504 = lifted_lambda_res_t_res_8660;
+            } else {
+                lifted_lambda_res_8504 = 0;
+            }
+            
+            int64_t defunc_0_f_res_8511 = btoi_bool_i64(lifted_lambda_res_8504);
+            int64_t defunc_0_op_res_8441 = add64(defunc_0_f_res_8511, scanacc_8742);
+            
+            ((int64_t *) mem_8845)[i_8745] = defunc_0_op_res_8441;
+            ((int64_t *) mem_8847)[i_8745] = defunc_0_f_res_8511;
+            
+            int64_t scanacc_tmp_8902 = defunc_0_op_res_8441;
+            
+            scanacc_8742 = scanacc_tmp_8902;
+        }
+        discard_8748 = scanacc_8742;
+        
+        bool cond_8443 = dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8274 == (int64_t) 0;
+        bool x_8444 = !cond_8443;
+        bool x_8446 = sle64((int64_t) 0, len_8273);
+        bool y_8447 = slt64(len_8273, dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8274);
+        bool bounds_check_8448 = x_8446 && y_8447;
+        bool protect_assert_disj_8449 = cond_8443 || bounds_check_8448;
+        bool index_certs_8450;
+        
+        if (!protect_assert_disj_8449) {
+            set_error(ctx, msgprintf("Error: %s%lld%s%lld%s\n\nBacktrace:\n%s", "Index [", (long long) len_8273, "] out of bounds for array of shape [", (long long) dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8274, "].", "-> #0  /prelude/soacs.fut:256:33-45\n   #1  primes-flat.fut:118:30-42\n   #2  primes-flat.fut:118:1-42\n"));
+            err = FUTHARK_PROGRAM_ERROR;
+            goto cleanup;
+        }
+        
+        int64_t m_f_res_8451;
+        
+        if (x_8444) {
+            int64_t x_8661 = ((int64_t *) mem_8845)[len_8273];
+            
+            m_f_res_8451 = x_8661;
+        } else {
+            m_f_res_8451 = (int64_t) 0;
+        }
+        
+        int64_t m_8453;
+        
+        if (cond_8443) {
+            m_8453 = (int64_t) 0;
+        } else {
+            m_8453 = m_f_res_8451;
+        }
+        
+        int64_t m_8463 = sub64(m_8453, (int64_t) 1);
+        bool i_p_m_t_s_leq_w_8465 = slt64(m_8463, dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8274);
+        bool zzero_leq_i_p_m_t_s_8464 = sle64((int64_t) 0, m_8463);
+        bool y_8467 = zzero_leq_i_p_m_t_s_8464 && i_p_m_t_s_leq_w_8465;
+        bool i_lte_j_8466 = sle64((int64_t) 0, m_8453);
+        bool forwards_ok_8468 = i_lte_j_8466 && y_8467;
+        bool eq_x_zz_8460 = (int64_t) 0 == m_f_res_8451;
+        bool p_and_eq_x_y_8461 = x_8444 && eq_x_zz_8460;
+        bool empty_slice_8462 = cond_8443 || p_and_eq_x_y_8461;
+        bool ok_or_empty_8469 = empty_slice_8462 || forwards_ok_8468;
+        bool index_certs_8470;
+        
+        if (!ok_or_empty_8469) {
+            set_error(ctx, msgprintf("Error: %s%lld%s%lld%s\n\nBacktrace:\n%s", "Index [:", (long long) m_8453, "] out of bounds for array of shape [", (long long) dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8274, "].", "-> #0  /prelude/soacs.fut:257:29-35\n   #1  primes-flat.fut:118:30-42\n   #2  primes-flat.fut:118:1-42\n"));
+            err = FUTHARK_PROGRAM_ERROR;
+            goto cleanup;
+        }
+        
+        int64_t bytes_8860 = (int64_t) 8 * m_8453;
+        
+        if (memblock_alloc(ctx, &mem_8861, bytes_8860, "mem_8861")) {
             err = 1;
             goto cleanup;
         }
-        for (int64_t i_8663 = 0; i_8663 < m_8196; i_8663++) {
-            int64_t x_8664 = (int64_t) 0 + i_8663 * (int64_t) 1;
+        for (int64_t i_8905 = 0; i_8905 < m_8453; i_8905++) {
+            int64_t x_8906 = (int64_t) 0 + i_8905 * (int64_t) 1;
             
-            ((int64_t *) mem_8617.mem)[i_8663] = x_8664;
+            ((int64_t *) mem_8861.mem)[i_8905] = x_8906;
         }
-        for (int64_t write_iter_8489 = 0; write_iter_8489 < dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8048; write_iter_8489++) {
-            int64_t write_iv_8491 = ((int64_t *) mem_8603)[write_iter_8489];
-            int64_t write_iv_8492 = ((int64_t *) mem_8601)[write_iter_8489];
-            bool cond_8223 = write_iv_8491 == (int64_t) 1;
-            int64_t lifted_lambda_res_8224;
+        for (int64_t write_iter_8749 = 0; write_iter_8749 < dzlz7bUZLzpZRz20Ulenz20U1z7dUzg_8274; write_iter_8749++) {
+            int64_t write_iv_8751 = ((int64_t *) mem_8847)[write_iter_8749];
+            int64_t write_iv_8752 = ((int64_t *) mem_8845)[write_iter_8749];
+            bool cond_8495 = write_iv_8751 == (int64_t) 1;
+            int64_t lifted_lambda_res_8496;
             
-            if (cond_8223) {
-                int64_t lifted_lambda_res_t_res_8393 = sub64(write_iv_8492, (int64_t) 1);
+            if (cond_8495) {
+                int64_t lifted_lambda_res_t_res_8662 = sub64(write_iv_8752, (int64_t) 1);
                 
-                lifted_lambda_res_8224 = lifted_lambda_res_t_res_8393;
+                lifted_lambda_res_8496 = lifted_lambda_res_t_res_8662;
             } else {
-                lifted_lambda_res_8224 = (int64_t) -1;
+                lifted_lambda_res_8496 = (int64_t) -1;
             }
-            if (sle64((int64_t) 0, lifted_lambda_res_8224) && slt64(lifted_lambda_res_8224, m_8196)) {
-                ((int64_t *) mem_8617.mem)[lifted_lambda_res_8224] = write_iter_8489;
+            if (sle64((int64_t) 0, lifted_lambda_res_8496) && slt64(lifted_lambda_res_8496, m_8453)) {
+                ((int64_t *) mem_8861.mem)[lifted_lambda_res_8496] = write_iter_8749;
             }
         }
         
-        bool loop_cond_8218 = slt64(len_8047, n_7520);
+        bool loop_cond_8476 = slt64(len_8273, n_7662);
         
-        if (memblock_set(ctx, &mem_param_tmp_8633, &mem_8617, "mem_8617") != 0)
+        if (memblock_set(ctx, &mem_param_tmp_8877, &mem_8861, "mem_8861") != 0)
             return 1;
         
-        int64_t ctx_param_ext_tmp_8634 = (int64_t) 0;
-        int64_t ctx_param_ext_tmp_8635 = (int64_t) 1;
-        int64_t loop_dz2081U_tmp_8636 = m_8196;
-        bool loop_while_tmp_8637 = loop_cond_8218;
-        int64_t len_tmp_8639 = len_8047;
+        int64_t ctx_param_ext_tmp_8878 = (int64_t) 0;
+        int64_t ctx_param_ext_tmp_8879 = (int64_t) 1;
+        int64_t loop_dz2081U_tmp_8880 = m_8453;
+        bool loop_while_tmp_8881 = loop_cond_8476;
+        int64_t len_tmp_8883 = len_8273;
         
-        if (memblock_set(ctx, &mem_param_8506, &mem_param_tmp_8633, "mem_param_tmp_8633") != 0)
+        if (memblock_set(ctx, &mem_param_8766, &mem_param_tmp_8877, "mem_param_tmp_8877") != 0)
             return 1;
-        ctx_param_ext_8504 = ctx_param_ext_tmp_8634;
-        ctx_param_ext_8505 = ctx_param_ext_tmp_8635;
-        loop_dz2081U_8037 = loop_dz2081U_tmp_8636;
-        loop_while_8038 = loop_while_tmp_8637;
-        len_8040 = len_tmp_8639;
+        ctx_param_ext_8764 = ctx_param_ext_tmp_8878;
+        ctx_param_ext_8765 = ctx_param_ext_tmp_8879;
+        loop_dz2081U_8263 = loop_dz2081U_tmp_8880;
+        loop_while_8264 = loop_while_tmp_8881;
+        len_8266 = len_tmp_8883;
     }
-    if (memblock_set(ctx, &ext_mem_8626, &mem_param_8506, "mem_param_8506") != 0)
+    if (memblock_set(ctx, &ext_mem_8870, &mem_param_8766, "mem_param_8766") != 0)
         return 1;
-    ext_8625 = ctx_param_ext_8504;
-    ext_8624 = ctx_param_ext_8505;
-    sq_primes_8033 = loop_dz2081U_8037;
-    sq_primes_8034 = loop_while_8038;
-    sq_primes_8036 = len_8040;
-    if (memblock_unref(ctx, &mem_8503, "mem_8503") != 0)
+    ext_8869 = ctx_param_ext_8764;
+    ext_8868 = ctx_param_ext_8765;
+    sq_primes_8259 = loop_dz2081U_8263;
+    sq_primes_8260 = loop_while_8264;
+    sq_primes_8262 = len_8266;
+    if (memblock_unref(ctx, &mem_8763, "mem_8763") != 0)
         return 1;
     
-    int64_t bytes_8627 = (int64_t) 8 * sq_primes_8033;
+    int64_t bytes_8871 = (int64_t) 8 * sq_primes_8259;
     
-    if (memblock_alloc(ctx, &mem_8628, bytes_8627, "mem_8628")) {
+    if (memblock_alloc(ctx, &mem_8872, bytes_8871, "mem_8872")) {
         err = 1;
         goto cleanup;
     }
-    lmad_copy_8b(ctx, 1, (uint64_t *) mem_8628.mem, (int64_t) 0, (int64_t []) {(int64_t) 1}, (uint64_t *) ext_mem_8626.mem, ext_8625, (int64_t []) {ext_8624}, (int64_t []) {sq_primes_8033});
-    if (memblock_unref(ctx, &ext_mem_8626, "ext_mem_8626") != 0)
+    lmad_copy_8b(ctx, 1, (uint64_t *) mem_8872.mem, (int64_t) 0, (int64_t []) {(int64_t) 1}, (uint64_t *) ext_mem_8870.mem, ext_8869, (int64_t []) {ext_8868}, (int64_t []) {sq_primes_8259});
+    if (memblock_unref(ctx, &ext_mem_8870, "ext_mem_8870") != 0)
         return 1;
-    if (memblock_set(ctx, &mem_out_8630, &mem_8628, "mem_8628") != 0)
+    if (memblock_set(ctx, &mem_out_8874, &mem_8872, "mem_8872") != 0)
         return 1;
-    prim_out_8631 = sq_primes_8033;
-    if (memblock_set(ctx, &*mem_out_p_8666, &mem_out_8630, "mem_out_8630") != 0)
+    prim_out_8875 = sq_primes_8259;
+    if (memblock_set(ctx, &*mem_out_p_8908, &mem_out_8874, "mem_out_8874") != 0)
         return 1;
-    *out_prim_out_8667 = prim_out_8631;
+    *out_prim_out_8909 = prim_out_8875;
     
   cleanup:
     {
-        free(mem_8508);
-        free(mem_8510);
-        free(mem_8512);
-        free(mem_8532);
-        free(mem_8534);
-        free(mem_8548);
-        free(mem_8550);
-        free(mem_8552);
-        free(mem_8572);
-        free(mem_8579);
-        free(mem_8587);
-        free(mem_8601);
-        free(mem_8603);
-        if (memblock_unref(ctx, &mem_8628, "mem_8628") != 0)
+        free(mem_8768);
+        free(mem_8776);
+        free(mem_8778);
+        free(mem_8792);
+        free(mem_8794);
+        free(mem_8796);
+        free(mem_8816);
+        free(mem_8823);
+        free(mem_8831);
+        free(mem_8845);
+        free(mem_8847);
+        if (memblock_unref(ctx, &mem_8872, "mem_8872") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_param_tmp_8633, "mem_param_tmp_8633") != 0)
+        if (memblock_unref(ctx, &mem_param_tmp_8877, "mem_param_tmp_8877") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_8617, "mem_8617") != 0)
+        if (memblock_unref(ctx, &mem_8861, "mem_8861") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_param_8506, "mem_param_8506") != 0)
+        if (memblock_unref(ctx, &mem_param_8766, "mem_param_8766") != 0)
             return 1;
-        if (memblock_unref(ctx, &ext_mem_8626, "ext_mem_8626") != 0)
+        if (memblock_unref(ctx, &ext_mem_8870, "ext_mem_8870") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_8503, "mem_8503") != 0)
+        if (memblock_unref(ctx, &mem_8763, "mem_8763") != 0)
             return 1;
-        if (memblock_unref(ctx, &mem_out_8630, "mem_out_8630") != 0)
+        if (memblock_unref(ctx, &mem_out_8874, "mem_out_8874") != 0)
             return 1;
     }
     return err;
@@ -7622,22 +8570,22 @@ FUTHARK_FUN_ATTR int futrts_entry_main(struct futhark_context *ctx, struct membl
 
 int futhark_entry_main(struct futhark_context *ctx, struct futhark_i64_1d **out0, const int64_t in0)
 {
-    int64_t n_7520 = (int64_t) 0;
-    int64_t prim_out_8631 = (int64_t) 0;
+    int64_t n_7662 = (int64_t) 0;
+    int64_t prim_out_8875 = (int64_t) 0;
     int ret = 0;
     
     lock_lock(&ctx->lock);
     
-    struct memblock mem_out_8630;
+    struct memblock mem_out_8874;
     
-    mem_out_8630.references = NULL;
-    n_7520 = in0;
+    mem_out_8874.references = NULL;
+    n_7662 = in0;
     if (ret == 0) {
-        ret = futrts_entry_main(ctx, &mem_out_8630, &prim_out_8631, n_7520);
+        ret = futrts_entry_main(ctx, &mem_out_8874, &prim_out_8875, n_7662);
         if (ret == 0) {
             assert((*out0 = (struct futhark_i64_1d *) malloc(sizeof(struct futhark_i64_1d))) != NULL);
-            (*out0)->mem = mem_out_8630;
-            (*out0)->shape[0] = prim_out_8631;
+            (*out0)->mem = mem_out_8874;
+            (*out0)->shape[0] = prim_out_8875;
         }
     }
     lock_unlock(&ctx->lock);

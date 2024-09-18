@@ -25,39 +25,34 @@ let mkFlagArray 't [m]
              shp_ind aoa_val             --   [1,1,1,1,1,1,1]
                                      -- res = [1,0,0,1,1,0,0,0,1,0] 
 
-
 -- from Helpercode LH2
-let segmented_scan [n] 't (op: t -> t -> t) (ne: t)
-                          (flags: [n]bool) (arr: [n]t) : [n]t =
-  let (_, res) = unzip <|
-    scan (\(x_flag,x) (y_flag,y) ->
-             let fl = x_flag || y_flag
-             let vl = if y_flag then y else op x y
+-- Segmented Scan Helper
+let sgmScan [n] 't (op: t -> t -> t) (ne: t)
+                   (flags: [n]i64) (arr: [n]t) : [n]t =
+  let (_, res) =
+    scan (\(x_flag,x) (y_flag,y) -> -- extended binop is denoted $\odot$
+             let fl = x_flag | y_flag
+             let vl = if y_flag != 0 then y else op x y
              in  (fl, vl)
-         ) (false, ne) (zip flags arr)
+         ) (0, ne) (zip flags arr)
+    |> unzip
   in  res
 
--- taken from https://futhark-lang.org/examples/exclusive-scan.html
-let exscan [n] 't (f: t -> t -> t) (ne: t) (xs: [n]t) : [n]t =
-  map2 (\i x -> if i == 0 then ne else x)
-       (indices xs)
-       (rotate (-1) (scan f ne xs))
 
 let flattened_iota [n] (mult_lens: [n]i64) : []i64 =
-    let inds = exscan (+) 0 mult_lens -- [0,1,4]
-    let size = (last inds) + (last mult_lens) -- 4 + 2 = 6
-    let flag = scatter (replicate size 0) inds mult_lens
-    let tmp = replicate size 1i64
-    let bool_flags = map (\x -> x > 0i64) flag
-    in segmented_scan (+) 0i64 bool_flags tmp
+    let rp = replicate n 1i64
+    let flag = mkFlagArray mult_lens 0i64 rp 
+    let vals = map (
+      \ f -> if f!=0 then 0 else 1
+    ) flag 
+    in sgmScan (+) 0 flag vals
 
-let flattened_replicate [n] (counts : [n]i64, values : [n]i64) : []i64 =
-  let inds = exscan (+) 0 counts -- [0,1,4]
-  let size = (last inds) + (last counts) -- 4 + 2 = 6
-  let flag = scatter (replicate size 0) inds counts -- [1, 3, 0, 0, 2, 0]
-  let vals = scatter (replicate size 0) inds values -- [7, 8, 0, 0, 9, 0]
-  let bool_flags = map (\x -> x > 0i64) flag
-  in segmented_scan (+) 0i64 bool_flags vals
+let flattened_replicate [n] (mult_lens: [n]i64, values : [n]i64) : []i64 =
+
+  let (flag_n,flag_v) = zip mult_lens values 
+    |> mkFlagArray mult_lens (0i64, 0i64) 
+    |> unzip
+  in sgmScan (+) 0 flag_n flag_v
 
 let primesFlat (n : i64) : []i64 =
   let sq_primes   = [2i64, 3i64, 5i64, 7i64]
@@ -90,7 +85,8 @@ let primesFlat (n : i64) : []i64 =
       -- Also note that `not_primes` has flat length equal to `flat_size`
       --  and the shape of `composite` is `mult_lens`. 
       
-      let twoms = map (+2) (flattened_iota mult_lens) :> [flat_size]i64
+      let iots = flattened_iota mult_lens :> [flat_size]i64
+      let twoms = map (+2) iots
       let replicate_primes = flattened_replicate (mult_lens, sq_primes) :> [flat_size]i64
 
       let not_primes = map2 (\j p -> 

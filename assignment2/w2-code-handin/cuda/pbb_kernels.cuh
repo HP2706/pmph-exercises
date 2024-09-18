@@ -239,8 +239,10 @@ scanIncBlock(volatile typename OP::RedElTp* ptr, const unsigned int idx) {
     } */
     
     // 2. Place the end-of-warp results into a separate location in shared memory.
+    typename OP::RedElTp end = OP::remVolatile(ptr[idx])
+    __syncthreads();
     if (lane == (WARP - 1)) {
-        ptr[blockDim.x + warpid] = OP::remVolatile(ptr[idx]);
+        ptr[warpid] = end;
     }
     __syncthreads();
 
