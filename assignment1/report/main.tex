@@ -99,7 +99,7 @@ We start by applying the identity:
 Now, we apply the three lemmas in sequence:
 
 \begin{enumerate}
-    \item Apply lemma 2: $(\text{map } f) \circ (\text{reduce } (++)\; []) \equiv (\text{reduce } (++)\; []) \circ (\text{map } (\text{map } f))$
+    \item Apply lemma 2: $(\text{map } f) \circ (\text{reduce } (++)\; []) \equiv (\text{reduce } (++) \; []) \circ (\text{map } (\text{map } f))$
     \begin{align*}
     &= (\text{reduce } (+) \; 0) \circ (\text{reduce } (++) \; []) \circ (\text{map } (\text{map } f)) \circ \text{distr}_p
     \end{align*}
@@ -132,12 +132,19 @@ This completes the proof of the Optimized Map-Reduce Lemma.
 
     \subsubsection*{1. LSSP Operator Implementation}
     \begin{lstlisting}[language=Haskell]
-    let segments_connect = x_len == 0 || y_len == 0 || pred2 x_last y_first
+    let segments_connect = 
+        x_len == 0 
+        || y_len == 0 
+        || pred2 x_last y_first
 
-    let new_lss = max (max x_lss y_lss) (if segments_connect then x_lcs + y_lis else 0)
+    let new_lss = max 
+        (max x_lss y_lss) 
+        (if segments_connect then x_lcs + y_lis else 0)
 
-    let new_lis = if segments_connect && x_lis == x_len then x_lis + y_lis else x_lis
-    let new_lcs = if segments_connect && y_lcs == y_len then x_lcs + y_lcs else y_lcs
+    let new_lis = if segments_connect && 
+        x_lis == x_len then x_lis + y_lis else x_lis
+    let new_lcs = if segments_connect && 
+        y_lcs == y_len then x_lcs + y_lcs else y_lcs
 
     let new_len = x_len + y_len
 
@@ -157,20 +164,21 @@ This completes the proof of the Optimized Map-Reduce Lemma.
     -- output { 
     --    9
     -- }
+    -- This test checks for a mixed sequence with a long segment of zeros. 
     -- compiled input {
     --     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     -- }
     -- output {
     --     10
     -- }
-    -- compiled input {
+    -- This test checks for a completely sorted sequence. 
     --     [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
     -- }
     -- output {
     --     1
     -- }
 
-    -- Small dataset for same
+    -- Small dataset for Same
     -- ==
     -- compiled input {
     --    [1, -2i32, -2i32, 2i32, 0i32, 0i32, 0i32, 3i32, 4i32, -6i32, 1i32]
@@ -178,18 +186,21 @@ This completes the proof of the Optimized Map-Reduce Lemma.
     -- output {
     --    3i32
     -- }
+    -- This test for the "Same" predicate checks a mixed sequence with repeated elements. 
     -- compiled input {
     --     [1i32, 0i32, 3i32, 3i32, 3i32, 3i32, 6i32, 7i32, 8i32, 9i32, 10i32]
     -- }
     -- output {
     --     4i32
     -- }
+    -- This test checks a sequence with a longer segment of identical elements. 
     -- compiled input {
     --     [1i32, 0i32, 1i32, 0i32, 1i32, 0i32, 1i32, 0i32, 1i32, 1i32]
     -- }
     -- output {
     --     2i32
     -- }
+    -- This test checks an alternating sequence ending with two identical elements. 
 
     -- Small dataset for zeros
     -- ==
@@ -197,37 +208,47 @@ This completes the proof of the Optimized Map-Reduce Lemma.
     -- 
     -- input { [0i32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1] }
     -- output { 10i32 }
-    --
+    -- This test for the "zeros" predicate checks a sequence with a long run of zeros followed by a non-zero element. 
     -- input { [1i32, -2, -2, 0, 0, 0, 3, 4, -6] }
     -- output { 3i32 }
-    --
+    -- This test checks a mixed sequence with a shorter run of zeros. 
     -- input { [0i32, 1, 0, 0, 3, 0, 0, 4, 0] }
     -- output { 2i32 }
-    --
-    -- input { [0i32, 1, 0, 0, 1] }
+    -- This test checks a sequence with multiple short runs of zeros. 
     -- output { 2i32 }
+    -- This test checks a short sequence with a run of zeros in the middle. 
     \end{lstlisting}
 
     \subsubsection*{3. Performance Comparison}
 
-    Runtimes and speedups:
+    Runtimes and speedups for the LSSP benchmarks on arrays of size
+    $10^8$:
+
+    we generate the data as follows:
+    \begin{lstlisting}[language=Futhark, basicstyle=\footnotesize]
+        futhark dataset --i32-bounds=-10:10 -b -g [100000000]i32 > data.in
+        futhark c gen-lssp-same.fut && ./gen-lssp-same < data.in > data_same.out
+        futhark c gen-lssp-sorted.fut && ./gen-lssp-sorted < data.in > data_sorted.out
+        futhark c gen-lssp-zeros.fut && ./gen-lssp-zeros < data.in > data_zeros.out
+    \end{lstlisting}
 
     \begin{table}[h]
     \centering
-    \begin{tabular}{|l|r|r|c|}
+    \begin{tabular}{|l|r|c|c|}
     \hline
-    \textbf{Benchmark} & \textbf{Sequential Runtime} & \textbf{Parallel Runtime} & \textbf{Speedup} \\
+    \textbf{Benchmark} & \textbf{Parallel Runtime (us)} & \textbf{Speedup} & \textbf{Backend} \\
     \hline
-    lssp-zeros & 286.3 & 42.1 & 6.8x \\
-    lssp-sorted & 473.3 & 41.6 & 11.4x \\
-    lssp-same & 181.4 & 42.0 & 4.3x \\
+    lssp-zeros & 135340 & 1.0x & C \\
+    lssp-zeros & 2259 & 59.9x & CUDA \\
+    lssp-sorted & 416340 & 1.0x & C \\
+    lssp-sorted & 2226 & 187.0x & CUDA \\
+    lssp-same & 155244 & 1.0x & C \\
+    lssp-same & 2225.3 & 70.0x & CUDA \\
     \hline
     \end{tabular}
     \caption{Runtime comparison and speedup for LSSP benchmarks}
     \label{tab:lssp-benchmarks}
     \end{table}
-
-    \textit{Note: The values shown are placeholder values. Please replace them with the actual measured values for each benchmark.}
 
 \end{itemize}
 

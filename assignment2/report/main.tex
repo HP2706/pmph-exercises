@@ -306,12 +306,12 @@ Please explain in the report:
   
   code for determining number of blocks:
   
-  \begin{lstlisting}[language=cuda]
+  \begin{lstlisting}[language=cuda, basicstyle=\footnotesize]
     unsigned int num_blocks     = (tot_size + block_size - 1) / block_size;
     unsigned int num_blocks_shp = (mat_rows + block_size - 1) / block_size;  
   \end{lstlisting}
 
-  \begin{lstlisting}[language=cuda]
+  \begin{lstlisting}[language=cuda, basicstyle=\footnotesize]
     #ifndef SPMV_MUL_KERNELS
     #define SPMV_MUL_KERNELS
 
@@ -336,7 +336,13 @@ Please explain in the report:
     }
 
     __global__ void
-    mult_pairs(int* mat_inds, float* mat_vals, float* vct, int tot_size, float* tmp_pairs) {
+    mult_pairs(
+        int* mat_inds, 
+        float* mat_vals, 
+        float* vct, 
+        int tot_size, 
+        float* tmp_pairs
+    ) {
         uint32_t gid = blockIdx.x * blockDim.x + threadIdx.x;
         if (gid < tot_size) {
             tmp_pairs[gid] = mat_vals[gid] * vct[mat_inds[gid]];
@@ -352,7 +358,8 @@ Please explain in the report:
     ) {
         uint32_t gid = blockIdx.x * blockDim.x + threadIdx.x;
         if (gid < mat_rows) {
-            res_vct_d[gid] = tmp_scan[mat_shp_sc_d[gid] - 1]; // the read from temp_scan the last element of each segment
+            res_vct_d[gid] = tmp_scan[mat_shp_sc_d[gid] - 1]; 
+            // the read from temp_scan the last element of each segment
         }
     }
 
