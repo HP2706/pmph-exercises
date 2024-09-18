@@ -231,7 +231,6 @@ scanIncBlock(volatile typename OP::RedElTp* ptr, const unsigned int idx) {
 
     // 2. Place the end-of-warp results into a separate location in shared memory.
 
-    __syncthreads();
     /* 
     original code:
     if (lane == (WARP-1)) { 
@@ -239,23 +238,23 @@ scanIncBlock(volatile typename OP::RedElTp* ptr, const unsigned int idx) {
     } */
     
     // 2. Place the end-of-warp results into a separate location in shared memory.
-    typename OP::RedElTp end = OP::remVolatile(ptr[idx])
+    typename OP::RedElTp end = OP::remVolatile(ptr[idx]);
     __syncthreads();
     if (lane == (WARP - 1)) {
         ptr[warpid] = end;
     }
-    __syncthreads();
 
+    __syncthreads();
     // 3. Let the first warp scan the per-warp sums.
-    if (warpid == 0 && idx < n_warps) {
-        scanIncWarp<OP>(ptr + blockDim.x, idx);
-    }
+    // 3. scan again the first warp.
+    if (warpid == 0) scanIncWarp<OP>(ptr, idx);
     __syncthreads();
 
-    // 4. Accumulate results from the previous step.
+    // 4. accumulate results from previous step.
     if (warpid > 0) {
-        res = OP::apply(ptr[blockDim.x + warpid - 1], res);
+        res = OP::apply(ptr[warpid-1], res);
     }
+
 
     return res;
 }
