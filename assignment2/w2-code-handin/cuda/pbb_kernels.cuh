@@ -184,22 +184,12 @@ scanIncWarp(
 ) {
     const unsigned int lane = idx & (WARP-1);
     
-    /* 
-    if(lane==0) {
-        #pragma unroll
-        for(int i=1; i<WARP; i++) {
-            ptr[idx+i] = OP::apply(ptr[idx+i-1], ptr[idx+i]);
-        }
-    }
-    */
-
     #pragma unroll
     for (int d = 0; d < 5; d++) {
         int h = 1 << d; // 2^d double the stride
         if (lane >= h) {
             ptr[idx] = OP::apply(ptr[idx - h], ptr[idx]);
         }
-        // No __syncwarp() needed as warp threads execute in lockstep
     }
     
     return OP::remVolatile(ptr[idx]);
@@ -228,17 +218,11 @@ scanIncBlock(volatile typename OP::RedElTp* ptr, const unsigned int idx) {
     // 1. Perform scan at warp level.
     typename OP::RedElTp res = scanIncWarp<OP>(ptr, idx);
     __syncthreads();
-
-    // 2. Place the end-of-warp results into a separate location in shared memory.
-
-    /* 
-    original code:
-    if (lane == (WARP-1)) { 
-        ptr[warpid] = OP::remVolatile(ptr[idx]); 
-    } */
     
-    // 2. Place the end-of-warp results into a separate location in shared memory.
+    // Place the end-of-warp results into a separate location in memory.
     typename OP::RedElTp end = OP::remVolatile(ptr[idx]);
+    // synchronize the threads so that every thread has stored 
+    // the value in the memory location before we write
     __syncthreads();
     if (lane == (WARP - 1)) {
         ptr[warpid] = end;

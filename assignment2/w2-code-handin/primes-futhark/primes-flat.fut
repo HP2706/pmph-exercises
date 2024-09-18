@@ -38,7 +38,6 @@ let sgmScan [n] 't (op: t -> t -> t) (ne: t)
     |> unzip
   in  res
 
-
 let flattened_iota [n] (mult_lens: [n]i64) : []i64 =
     let rp = replicate n 1i64
     let flag = mkFlagArray mult_lens 0i64 rp 
@@ -48,7 +47,6 @@ let flattened_iota [n] (mult_lens: [n]i64) : []i64 =
     in sgmScan (+) 0 flag vals
 
 let flattened_replicate [n] (mult_lens: [n]i64, values : [n]i64) : []i64 =
-
   let (flag_n,flag_v) = zip mult_lens values 
     |> mkFlagArray mult_lens (0i64, 0i64) 
     |> unzip

@@ -47,8 +47,75 @@ In your report:
 
 \begin{itemize}
   \item Please state whether your implementation validates on both datasets.
+  
+  my implementation validates on both datasets.
   \item Present the code that you have added and briefly explain it, i.e., its correspondence to the flattening rules.
+  \begin{lstlisting}[language=futhark, basicstyle=\footnotesize]
+  -- we can implement a flattened iota version with 
+  -- a composition of a segmented scan
+  let flattened_iota [n] (mult_lens: [n]i64) : []i64 =
+    let rp = replicate n 1i64
+    let flag = mkFlagArray mult_lens 0i64 rp 
+    let vals = map (
+      \ f -> if f!=0 then 0 else 1
+    ) flag 
+    in sgmScan (+) 0 flag vals
+
+  -- we can implement a flattened replicate version with a segmented scan 
+  let flattened_replicate [n] (mult_lens: [n]i64, values : [n]i64) : []i64 =
+    let (flag_n,flag_v) = zip mult_lens values 
+      |> mkFlagArray mult_lens (0i64, 0i64) 
+      |> unzip
+    in sgmScan (+) 0 flag_n flag_v
+
+  ....
+
+  -- the flattened implementation 
+  let iots = flattened_iota mult_lens :> [flat_size]i64
+  let twoms = map (+2) iots -- we add 2 to each element
+
+  -- replicate the primes array
+  let replicate_primes = flattened_replicate (mult_lens, sq_primes) :> [flat_size]i64
+
+  -- we use a map2 to multiply each element of twoms by the corresponding 
+  --element of replicate_primes
+  let not_primes = map2 (\j p -> 
+    j*p
+  ) twoms replicate_primes :> [flat_size]i64
+  \end{lstlisting}
+
+  flattening rules applied:
+
+  much of the code for flattened iota and replicate are taken from lecture-notes Line 53-55
+
+  flattened iota(rule 4): can be rewritten as a composition composition of scan and scatter:
+  flattened replicate(rule 3): can be rewritten as a composition of a  composition of scan and scatter
+
+  However note that our implementation is using the segmented scan instead of scan and scatter. 
+  We can do this as a scan + scatter can be rewritten as a segmented scan.
+
+
   \item Report the runtimes of all four code versions for the large dataset and try to briefly explain them, i.e., do they match what you would expect from their work-depth complexity?
+
+  \begin{table}[h]
+    \centering
+    \begin{tabular}{|l|l|r|}
+    \hline
+    \textbf{Filename} & \textbf{Backend} & \textbf{mean Runtime (us)} \\
+    \hline
+    primes-flat.fut & cuda & 3102 \\
+    primes-adhoq.fut & cuda & 182061.6 \\
+    primes-naive.fut & cuda & 50080.4 \\
+    primes-seq.fut & c & 187043.9 \\
+    \hline
+    \end{tabular}
+    \caption{Runtime for large dataset (10000000i64)}
+    \label{tab:runtime_comparison}
+  \end{table}
+
+  we note that the flat implementation although it theoretically has worse work and depth complexity compared to adhoq implementation is much more
+  performant. 
+
 \end{itemize}
 
 \section{Task 2}
@@ -93,36 +160,24 @@ Please write in your report:
 Solution:
 
 \begin{lstlisting}[language=cuda]
-template<class OP>
-__device__ inline typename OP::RedElTp
-scanIncBlock(volatile typename OP::RedElTp* ptr, const unsigned int idx) {
-    const unsigned int lane    = idx & (WARP - 1);
-    const unsigned int warpid  = idx >> lgWARP;
-    const unsigned int n_warps = (blockDim.x + WARP - 1) >> lgWARP; // Total number of warps
-
-    // 1. Perform scan at warp level.
-    typename OP::RedElTp res = scanIncWarp<OP>(ptr, idx);
-    __syncthreads();
-
-    // 2. Place the end-of-warp results into a separate location in shared memory.
-    if (lane == (WARP - 1)) {
-        ptr[blockDim.x + warpid] = OP::remVolatile(ptr[idx]);
-    }
-    __syncthreads();
-
-    // 3. Let the first warp scan the per-warp sums.
-    if (warpid == 0 && idx < n_warps) {
-        scanIncWarp<OP>(ptr + blockDim.x, idx);
-    }
-    __syncthreads();
-
-    // 4. Accumulate results from the previous step.
-    if (warpid > 0) {
-        res = OP::apply(ptr[blockDim.x + warpid - 1], res);
-    }
-
-    return res;
-}
+  template<class OP>
+  __device__ inline typename OP::RedElTp
+  scanIncWarp( 
+      volatile typename OP::RedElTp* ptr, 
+      const unsigned int idx 
+  ) {
+      const unsigned int lane = idx & (WARP-1);
+      
+      #pragma unroll
+      for (int d = 0; d < 5; d++) {
+          int h = 1 << d; // 2^d double the stride
+          if (lane >= h) {
+              ptr[idx] = OP::apply(ptr[idx - h], ptr[idx]);
+          }
+      }
+      
+      return OP::remVolatile(ptr[idx]);
+  }
 \end{lstlisting}
 
 Explain the performance impact of your implementation: which tests were affected and by what factor. Does the impact become higher for smaller array lengths?
@@ -153,33 +208,36 @@ Explain the performance impact of your implementation: which tests were affected
 
 
 we compare the two kernels for various array sizes:
+in the below table coalesced refers to the performance when including optimizations from task 2.
+Naive and Opt refers to the warp level scan implementation vs the thread level scan implementation.
 
 \begin{table}[h]
   \centering
   \small
+  \setlength{\tabcolsep}{1pt}
   \begin{tabular}{|l|r|r|r|r|r|r|r|r|}
   \hline
   \multirow{2}{*}{\textbf{Operation}} & \multicolumn{2}{c|}{\textbf{13,565}} & \multicolumn{2}{c|}{\textbf{103,565}} & \multicolumn{2}{c|}{\textbf{1,003,565}} & \multicolumn{2}{c|}{\textbf{10,003,565}} \\
   \cline{2-9}
    & \textbf{GB/s} & \textbf{\% Diff} & \textbf{GB/s} & \textbf{\% Diff} & \textbf{GB/s} & \textbf{\% Diff} & \textbf{GB/s} & \textbf{\% Diff} \\
   \hline
-  Naive Reduce AddI32 (Unopt) & 0.94 & \multirow{2}{*}{-8.5\%} & 5.92 & \multirow{2}{*}{-9.1\%} & 40.14 & \multirow{2}{*}{+3.1\%} & 165.35 & \multirow{2}{*}{+9.0\%} \\
-  Naive Reduce AddI32 (Opt) & 0.86 & & 5.38 & & 41.38 & & 180.24 & \\
+  Naive Reduce AddI32 (UnCoalesced) & 0.94 & \multirow{2}{*}{-8.5\%} & 5.92 & \multirow{2}{*}{-9.1\%} & 40.14 & \multirow{2}{*}{+3.1\%} & 165.35 & \multirow{2}{*}{+9.0\%} \\
+  Naive Reduce AddI32 (Coalesced) & 0.86 & & 5.38 & & 41.38 & & 180.24 & \\
   \hline
-  Opt Reduce AddI32 (Unopt) & 3.88 & \multirow{2}{*}{+27.1\%} & 27.62 & \multirow{2}{*}{+36.4\%} & 160.57 & \multirow{2}{*}{+78.4\%} & 625.22 & \multirow{2}{*}{+25.5\%} \\
-  Opt Reduce AddI32 (Opt) & 4.93 & & 37.66 & & 286.73 & & 784.59 & \\
+  Opt Reduce AddI32 (UnCoalesced) & 3.88 & \multirow{2}{*}{+27.1\%} & 27.62 & \multirow{2}{*}{+36.4\%} & 160.57 & \multirow{2}{*}{+78.4\%} & 625.22 & \multirow{2}{*}{+25.5\%} \\
+  Opt Reduce AddI32 (Coalesced) & 4.93 & & 37.66 & & 286.73 & & 784.59 & \\
   \hline
-  Naive Reduce MSSP (Unopt) & 0.92 & \multirow{2}{*}{-23.9\%} & 4.87 & \multirow{2}{*}{-15.8\%} & 25.25 & \multirow{2}{*}{+1.9\%} & 57.82 & \multirow{2}{*}{+8.3\%} \\
-  Naive Reduce MSSP (Opt) & 0.70 & & 4.10 & & 25.73 & & 62.62 & \\
+  Naive Reduce MSSP (UnCoalesced) & 0.92 & \multirow{2}{*}{-23.9\%} & 4.87 & \multirow{2}{*}{-15.8\%} & 25.25 & \multirow{2}{*}{+1.9\%} & 57.82 & \multirow{2}{*}{+8.3\%} \\
+  Naive Reduce MSSP (Coalesced) & 0.70 & & 4.10 & & 25.73 & & 62.62 & \\
   \hline
-  Opt Reduce MSSP (Unopt) & 1.55 & \multirow{2}{*}{+29.7\%} & 10.90 & \multirow{2}{*}{+40.7\%} & 51.46 & \multirow{2}{*}{+62.5\%} & 79.08 & \multirow{2}{*}{+65.9\%} \\
-  Opt Reduce MSSP (Opt) & 2.01 & & 15.34 & & 83.63 & & 131.19 & \\
+  Opt Reduce MSSP (UnCoalesced) & 1.55 & \multirow{2}{*}{+29.7\%} & 10.90 & \multirow{2}{*}{+40.7\%} & 51.46 & \multirow{2}{*}{+62.5\%} & 79.08 & \multirow{2}{*}{+65.9\%} \\
+  Opt Reduce MSSP (Coalesced) & 2.01 & & 15.34 & & 83.63 & & 131.19 & \\
   \hline
-  Scan Inc AddI32 (Unopt) & 6.03 & \multirow{2}{*}{+17.4\%} & 42.85 & \multirow{2}{*}{+26.1\%} & 236.13 & \multirow{2}{*}{+50.0\%} & 412.52 & \multirow{2}{*}{+55.6\%} \\
-  Scan Inc AddI32 (Opt) & 7.08 & & 54.03 & & 354.20 & & 641.94 & \\
+  Scan Inc AddI32 (UnCoalesced) & 6.03 & \multirow{2}{*}{+17.4\%} & 42.85 & \multirow{2}{*}{+26.1\%} & 236.13 & \multirow{2}{*}{+50.0\%} & 412.52 & \multirow{2}{*}{+55.6\%} \\
+  Scan Inc AddI32 (Coalesced) & 7.08 & & 54.03 & & 354.20 & & 641.94 & \\
   \hline
-  SgmScan Inc AddI32 (Unopt) & 8.26 & \multirow{2}{*}{-20.7\%} & 60.41 & \multirow{2}{*}{-17.2\%} & 226.61 & \multirow{2}{*}{+1.6\%} & 434.94 & \multirow{2}{*}{-0.3\%} \\
-  SgmScan Inc AddI32 (Opt) & 6.55 & & 50.00 & & 230.33 & & 433.59 & \\
+  SgmScan Inc AddI32 (UnCoalesced) & 8.26 & \multirow{2}{*}{-20.7\%} & 60.41 & \multirow{2}{*}{-17.2\%} & 226.61 & \multirow{2}{*}{+1.6\%} & 434.94 & \multirow{2}{*}{-0.3\%} \\
+  SgmScan Inc AddI32 (Coalesced) & 6.55 & & 50.00 & & 230.33 & & 433.59 & \\
   \hline
   \end{tabular}
   \caption{Performance comparison (GB/s) between optimized and unoptimized versions for different array sizes}
@@ -195,23 +253,44 @@ Please explain in the report:
 \begin{itemize}
   \item The nature of the bug.
   
-  the nature of the bug is a race condition that occurs between thread number 1024 and 
-  this is because within this code block 
-  we are both reading and writing to ptr.
-  
+  The race condition occurs because:
+
+  1. For the last thread in each warp (lane 31), `warpid` is equal to the warp number (0 to 31).
+  2. For these threads, `idx` points to the last element of their respective warp's section in `ptr`.
+  3. When warp 31 executes this code:
+    - It reads from `ptr[1023]` (its last thread's `idx`)
+    - It writes to `ptr[31]` (its `warpid`)
+  4. However, `ptr[31]` is also where the last thread of warp 0 should store its result.
+
+  This creates a race condition between the last thread of warp 31 and the last thread of warp 0. The final value in `ptr[31]` becomes unpredictable, as it depends on which thread writes last.
+
+
   \begin{lstlisting}[language=cuda]
-    if (lane == (WARP-1)) { 
-        ptr[warpid] = OP::remVolatile(ptr[idx]); 
+    // Place the end-of-warp results into a separate location in memory.
+    typename OP::RedElTp end = OP::remVolatile(ptr[idx]);
+    // synchronize the threads so that every thread has stored 
+    // the value in the memory location before we write
+    __syncthreads();
+    if (lane == (WARP - 1)) {
+        ptr[warpid] = end;
     }
+    __syncthreads();
   \end{lstlisting}
 
-  the bug appears only w
+  the bug appears only when warpid is 31 and we are in the 32nd warp ie idx = 1024.
+  this is because in that instance we will have a race condition between thread 1024 in the block 
+  and warp 32. 
+
   \item How you fixed it.
   
+  We fix the issue by using a temporary value to store the value then synchronizing the threads.
+  and writing to the memory location only after the synchronization. In this way we avoid the race condition.
+
   \begin{lstlisting}[language=cuda]
+    typename OP::RedElTp end = OP::remVolatile(ptr[idx]);
+    __syncthreads();
     if (lane == (WARP - 1)) {
-        // we offset the index by blockDim.x to avoid race conditions
-        ptr[blockDim.x + warpid] = OP::remVolatile(ptr[idx]);
+        ptr[warpid] = end;
     }
   \end{lstlisting}
 
