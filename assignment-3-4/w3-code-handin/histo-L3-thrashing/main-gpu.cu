@@ -21,10 +21,6 @@ void multiStepHisto ( uint32_t* d_inp_inds
     const uint32_t CHUNK = ( LLC_FRAC * LLC ) / sizeof(float);
     uint32_t num_partitions = (H + CHUNK - 1) / CHUNK;
 
-    //printf( "Number of partitions: %f\n", ((float)H)/CHUNK );
-
-    uint32_t grid = (N + B - 1) / B;
-    cudaMemset(d_hist, 0, H * sizeof(float));
 
     /************************
      *** Cuda Exercise 1: ***
@@ -41,8 +37,18 @@ void multiStepHisto ( uint32_t* d_inp_inds
      * but is essentially equivalent with the naive kernel (hence
      * it has roughly the same performance).
      ****************************************************************/
-    {
-        multiStepKernel<<<grid,B>>>(d_inp_inds, d_inp_vals, d_hist, N, 0, H);
+    //printf( "Number of partitions: %f\n", ((float)H)/CHUNK );
+    cudaMemset(d_hist, 0, H * sizeof(float));
+    for(uint32_t k=0; k<num_partitions; k++) {
+        // we process only the indices falling in
+        // the integral interval [k*CHUNK, (k+1)*CHUNK)
+        uint32_t low_bound = k*CHUNK;
+        uint32_t upp_bound = min( (k+1)*CHUNK, H );
+
+        uint32_t grid = (N + B - 1) / B;
+        {
+            multiStepKernel<<<grid,B>>>(d_inp_inds, d_inp_vals, d_hist, N, low_bound, upp_bound);
+        }
     }
 }
 
