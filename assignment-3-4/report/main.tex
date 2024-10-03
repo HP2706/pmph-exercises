@@ -5,6 +5,10 @@
 \usepackage{hyperref}
 \usepackage{tikz}
 
+\usepackage{listings}
+\lstdefinelanguage{cuda}{language=C++,morekeywords={__global__,__device__,__host__,__shared__}}
+% A listings language definition for Futhark.
+
 
 \lstdefinelanguage{futhark}
 {
@@ -427,6 +431,48 @@ Briefly comment in your report on:
     (i.e., the other provided implementation)
 \end{itemize}
 
+solution code:
+\begin{lstlisting}[language=cuda]
+if(gid < N) {
+    uint32_t ind = inp_inds[gid];
+
+    /************************
+     *** Cuda Exercise 1: ***
+     * 
+     * Change the if condition to succeed
+     * only when the current index `ind` is
+     * within the bounds of the current chunk
+     * (less than UB and greater or equal to LB.)
+     ************************/
+    if(ind < UB && ind >= LB) {
+        float val = inp_vals[gid];
+        atomicAdd((float*)&hist[ind], val);
+    }
+}
+\end{lstlisting}
+
+//TODO, better explanation
+the reason that allthough we are doing more memory accesses, the accesses are coalesced which cause the large improvement.
+
+The implementation validates and we get following performance results with evaluating on an A100 40GB gpu
+
+\begin{table}[h]
+    \centering
+    \begin{tabular}{|l|c|c|c|}
+    \hline
+    \textbf{Implementation} & \textbf{Runtime (ups)} & \textbf{GB/sec} & \textbf{Speedup} \\
+    \hline
+    CPU Original & 1,776,744 & 4.96 & - \\
+    CPU Multi-Pass & 1,049,537 & 8.40 & 1.69x \\
+    GPU Original (Baseline) & 73,155 & 118.40 & - \\
+    GPU Multi-Step (Optimized) & 19,127 & 452.86 & 3.82x \\
+    \hline
+    \end{tabular}
+    \caption{Performance comparison of histogram implementations}
+    \label{tab:histogram-performance}
+    \end{table}
+
+
 \section{Task 4: Optimizing Spatial Locality by Transposition -- CUDA exercise 2 (4 pts)}
 
 See section "Optimizing Spatial Locality by Transposition" in companion lecture slides \texttt{L6-locality.pdf}.
@@ -447,18 +493,86 @@ Please include in your report:
     \item The OpenMP (parallel) code of \texttt{goldeSeq.h}; report the speedup obtained
    by parallelizing golden sequential, i.e., sequential CPU runtime divided by
    parallel runtime.
+
+    \begin{lstlisting}[language=c]
+        #pragma omp parallel for private(a_el, accum)
+        for(uint64_t i = 0; i < num_rows; i++) {
+            uint64_t ii = i*num_cols;
+            accum = 0.0;
+            for(uint64_t j = 0; j < num_cols; j++) {
+                a_el  = A[ii + j];
+                accum = sqrt(accum) + a_el*a_el;
+                B[ii + j] = accum;
+            }
+        }
+    \end{lstlisting}
+    
+    %Original Program runs on CPU in: 343043 microsecs, GB/sec: 1.565025
+    
+    %Running CPU-Parallel Versions (OMP) demonstrating (un)coalesced accesses to global memory
+    %Original Program runs on CPU in: 6811 microsecs, GB/sec: 78.824097
+
+    the non parallelized cpu implementation has a runtime of 343043 microsecs and a GB/s of 1.565025.
+    the parallelized cpu implementation has a runtime of 6811 microsecs and a GB/s of 78.824097.
+    thus the speedup is 343043 / 6811 ~ 50 in latency and 78.824097 / 1.565025 ~ 50 in throughput.
+
     \item the CUDA-kernel code implementing your solution, i.e., present the code and comment on
     its correctness and on how it optimizes spatial locality (i.e., coalesced
     access to global memory). For example, why do
     you expect speedup when \textbf{your} implementation
     performs a factor of 3x more access to global
     memory than the baseline.
+
+    the cuda implementation of the transpose kernel VALIDATES and is as follows:
+
+    \begin{lstlisting}[language=cuda]
+    template<class ElTp>
+    __global__ void 
+    transKernel(ElTp* A_tr, ElTp* B_tr, uint32_t num_rows, uint32_t num_cols) {
+            uint32_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+            if(gid >= num_rows) return;
+        
+            ElTp accum = 0;
+            for(int j=0; j<num_cols; j++) {
+                ElTp el_a  = A_tr[j*num_rows + gid];
+                accum = sqrt(accum) + el_a * el_a;
+                B_tr[j*num_rows + gid] = accum;
+            }
+        }
+    \end{lstlisting}
+
+
+
+
     \item specify whether your CUDA implementation validates. (The handin does not, since that kernel is for you to implement).
     \item report the GB/sec achieved by \textbf{your} GPU implementation and of
     the GPU \textbf{baseline} , and also report the speedup w.r.t. the
     baseline.
+
+    performance results:
+    \begin{table}[h]
+        \centering
+        \begin{tabular}{|l|c|c|c|c|}
+        \hline
+        \textbf{Implementation} & \textbf{Runtime (us)} & \textbf{GB/sec} & \textbf{Latency Speedup} & \textbf{Throughput Speedup} \\
+        \hline
+        GPU Baseline & 7377 & 72.78 & - & - \\
+        GPU Optimized & 1332 & 403.06 & 5.54x & 5.54x \\
+        \hline
+        \end{tabular}
+        \caption{Performance comparison of baseline and optimized implementations}
+        \label{tab:performance-comparison}
+    \end{table}
+
     \item briefly explain why the CPU implementation that uses GPU-like
   coalescing has abysmal performance (i.e., much slower than the baseline).
+    
+    Program with GPU-like coalescing runs on CPU in: 696606 microsecs, GB/sec: 0.770695
+    this performance is abysmal due to the fundamental difference in how memory is used on gpus vs cpus. 
+    on gpus, having consecutive threads access consecutive memory is optimal, as this is coalesced, 
+    on the other hand this is not optimal for cpus, as they rely heavily on caching for performance.
+    When using GPU-like coalescing on a CPU, each thread accesses memory that is far apart, leading to poor cache line utilization. 
+
     \item \textbf{BONUS} briefly explain at a very high level, why/how
     "the Optimal-GPU Program" is about 2x faster than your implementation.
    ("the Optimal-GPU Program" is the last GPU program run by the Makefile)
@@ -479,14 +593,118 @@ Briefly comment in your report on:
 \begin{itemize}
     \item the code implementing your solution, i.e., show the code and comment on it,
     e.g., explaining why the access to global memory is coalesced
-    \item specify whether your implementation validates,
+
+    the code is as follows:
+
+    \begin{lstlisting}[language=cuda]
+        for(int kk = 0; kk < widthA; kk += Tk) {
+        /***************************************
+         * Cuda Exercise 3:
+         * Task 3.1:
+         *   Insert here the Cuda code that collectively copies---with 
+         *     all the T x T threads of the Cuda block---the
+         *     corresponding slice from A and B  (hold in global memory)
+         *     into shared-memory arrays Aloc[T*R][T] and Bloc[T][T*R].
+         *   You may assume (everywhere, including the explanation below)
+         *     that T = Tx = Ty = Tk AND R = Rx = Ry,
+         *     i.e., Tx, Ty, Tk have the same value and 
+         *         Rx and Ry have the same value.
+         ***************************************************************/
+  
+        /***************************************
+         * Subtask 3.1.1:
+         * Please insert here the code that collectively copies 
+         *    with the Ty x Tx threads of the Cuda block the 
+         *    following slice of A: 
+         *         A[iii : iii + Ty*Ry][kk : kk+Tk] 
+         *    to the shared-memory buffer Aloc, such that all accesses 
+         *    to A (and Aloc) are coalesced, i.e., consecutive
+         *    threads on the threadIdx.x dimension having the same
+         *    threadIdx.y value read consecutive locations in memory!
+         * If the index is out of the bounds of A then write 0 in Aloc.
+  
+        // Copying slice of A to Aloc
+        for (int i = 0; i < Ry; i++) {
+            int row = iii + threadIdx.y * Ry + i;
+            int col = kk + threadIdx.x;
+            if (row < heightA && col < widthA) {
+                Aloc[threadIdx.y * Ry + i][threadIdx.x] = A[row * widthA + col];
+            } else {
+                Aloc[threadIdx.y * Ry + i][threadIdx.x] = 0.0;
+            }
+        }
+  
+  
+        /***************************************
+         * Subtask 3.1.2:
+         * Please insert here the code that collectively copies 
+         *    with the Ty x Tx threads of the Cuda block the
+         *    following slice of B: 
+         *         B[kk : kk+Tk][jjj : jjj + Tx*Rx] 
+         *    to the shared-memory buffer Bloc, such that all accesses 
+         *    to B (and Bloc) are coalesced, i.e., consecutive
+         *    threads on the threadIdx.x dimension having the same
+         *    threadIdx.y value read consecutive locations in memory!
+         * If the index is out of the bounds of B then write 0 in Bloc.
+         
+  
+        // Please implement Task 3.1.2 here
+        // Copying slice of B to Bloc
+        for (int j = 0; j < Rx; j++) {
+            int row = kk + threadIdx.y;
+            int col = jjj + threadIdx.x * Rx + j;
+            if (row < widthA && col < widthB) {
+                Bloc[threadIdx.y][threadIdx.x * Rx + j] = B[row * widthB + col];
+            } else {
+                Bloc[threadIdx.y][threadIdx.x * Rx + j] = 0.0;
+            }
+        }
+  
+        __syncthreads();
+  
+        // compute the per-thread result css:
+        for(int k = 0; k < Tk; k++) {
+            #pragma unroll
+            for(int i=0; i<Ry; i++) {
+                #pragma unroll
+                for(int j=0; j<Rx; j++) {
+                    css[i][j] +=  
+                      Aloc[threadIdx.y * Ry + i][k] *
+                      Bloc[k][threadIdx.x * Rx + j] ;
+                }
+            }
+        }
+    }
+    \end{lstlisting}
+
+    as we are accessing consecutive memory locations in the shared memory, the accesses are coalesced.
+    //TODO better explanation
+    
     \item report the performance in Gflops achieved by \textbf{your} GPU implementation
     and by the GPU \textbf{baseline} , and also report the speedup w.r.t. the
     baseline.
+
+    
+    \begin{table}[h]
+        \centering
+        \begin{tabular}{|l|c|c|c|}
+        \hline
+        \textbf{Implementation} & \textbf{Runtime (us)} & \textbf{GFlops/sec} & \textbf{Speedup} \\
+        \hline
+        Naive Baseline & 14279 & 2406.31 & -\\
+        Optimized & 2859 & 12018.10 & 5 \\
+        \hline
+        \end{tabular}
+        \caption{Performance comparison of baseline and optimized implementations}
+        \label{tab:performance-comparison}
+    \end{table}
+
     \item Finally, explain in your report the high-level reasons for obtaining
     this speedup, i.e., how did your implementation improved the temporal
     locality (e.g., by what factor has decreased the number of accesses to
     global memory).
+
+    TODO
 \end{itemize}
 
 \section{Task 6: Batched Matrix Multiplication Under a Mask -- Cuda Exercise 4 (4 pts)}
@@ -499,10 +717,97 @@ Briefly comment in your report on:
 
 \begin{itemize}
     \item the code implementing your solution,
-    \item specify whether your implementation validates,
+    
+    the code(which validates) is as follows:
+    
+    \begin{lstlisting}[language=cuda]
+    template <class ElTp, int T> __global__
+    void bmmmTiledKer ( 
+    ElTp* A,      
+    ElTp* B, 
+    char* X_tr,  
+    ElTp* Y,
+    const int M, 
+    const int K, 
+    const int N
+    ) {
+        __shared__ ElTp Xsh_tr[T];
+        ElTp acc[T];
+
+        const int ii  = blockIdx.x;
+        const int j1  = threadIdx.y;
+        const int j2  = threadIdx.x;
+        const int i   = ii * T;
+        const int flat_idx = threadIdx.y * K + threadIdx.x;
+
+        #pragma unroll
+        for(int t=0; t<T; t++)
+            acc[t] = 0;
+
+        /***********************************************
+        *** Cuda Exercise 4: ***
+        * 
+        * With the help of the pseudocode from the
+        * lecture slides, please implement the rest of
+        * the code of this kernel.
+        * Remember to flatten the indices to all arrays
+        * hold in global memory, i.e., A, B, X_tr, Y.
+        ***********************************************/
+
+        // Main computation loop
+        for (int q = 0; q < N; q++) {
+            ElTp a = A[j1 * N + q];
+            ElTp b = B[q * K + j2];
+            // Update shared memory for next iteration
+            char tmp = 0;
+            if (flat_idx < T && i + flat_idx < M) {
+            tmp = X_tr[q * M + i + flat_idx];
+            }
+            Xsh_tr[flat_idx] = tmp;
+
+            __syncthreads();
+
+            #pragma unroll
+            for (int i_r = 0; i_r < T; i_r++) {
+            if (i + i_r < M) {
+                ElTp x = (Xsh_tr[i_r] != 0) ? 1.0 : 0.0;
+                acc[i_r] += a * b * x;
+            }
+            }
+            __syncthreads();
+        }
+
+        // Write results back to global memory
+        #pragma unroll
+        for (int i_r = 0; i_r < T; i_r++) {
+            if (i + i_r < M) {
+            Y[(i + i_r) * K * K + j1 * K + j2] = acc[i_r];
+            }
+        }
+    }
+    \end{lstlisting}
+
     \item report the performance in Gflops achieved by \textbf{your} GPU implementation
-    and by the GPU \textbf{baseline} , and also report the speedup w.r.t. the
-    baseline.
+    
+    GPU Naive BMMM version runs in: 5894 microsecs, GFlops/sec: 2184.90
+    VALID RESULT!
+    GPU RegTiled BMMM simple version runs in: 2334.5 microsecs, GFlops/sec: 5516.36
+    VALID RESULT!
+
+    \begin{table}[h]
+        \centering
+        \begin{tabular}{|l|c|c|c|}
+        \hline
+        \textbf{Implementation} & \textbf{Runtime (us)} & \textbf{GFlops/sec} & \textbf{Speedup} \\
+        \hline
+        Naive Baseline & 5894 & 2184.90 & -\\
+        Optimized & 2334.5 & 5516.36 & 2.53 \\
+        \hline
+        \end{tabular}
+        \caption{Performance comparison of baseline and optimized implementations}
+        \label{tab:performance-comparison}
+    \end{table}
+    
     \item Finally, explain in your report the high-level reasons for obtaining
     this speedup, i.e., how did your implementation improved the temporal
     locality (e.g., by what factor has decreased the number of accesses to
