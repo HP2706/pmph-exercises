@@ -624,32 +624,6 @@ Briefly comment in your report on:
 
     \begin{lstlisting}[language=cuda]
     for(int kk = 0; kk < widthA; kk += Tk) {
-        /***************************************
-         * Cuda Exercise 3:
-         * Task 3.1:
-         *   Insert here the Cuda code that collectively copies---with 
-         *     all the T x T threads of the Cuda block---the
-         *     corresponding slice from A and B  (hold in global memory)
-         *     into shared-memory arrays Aloc[T*R][T] and Bloc[T][T*R].
-         *   You may assume (everywhere, including the explanation below)
-         *     that T = Tx = Ty = Tk AND R = Rx = Ry,
-         *     i.e., Tx, Ty, Tk have the same value and 
-         *         Rx and Ry have the same value.
-         ***************************************************************/
-  
-        /***************************************
-         * Subtask 3.1.1:
-         * Please insert here the code that collectively copies 
-         *    with the Ty x Tx threads of the Cuda block the 
-         *    following slice of A: 
-         *         A[iii : iii + Ty*Ry][kk : kk+Tk] 
-         *    to the shared-memory buffer Aloc, such that all accesses 
-         *    to A (and Aloc) are coalesced, i.e., consecutive
-         *    threads on the threadIdx.x dimension having the same
-         *    threadIdx.y value read consecutive locations in memory!
-         * If the index is out of the bounds of A then write 0 in Aloc.
-  
-        // Copying slice of A to Aloc
         for (int i = 0; i < Ry; i++) {
             int row = iii + threadIdx.y * Ry + i;
             int col = kk + threadIdx.x;
@@ -660,22 +634,6 @@ Briefly comment in your report on:
             }
         }
   
-  
-        /***************************************
-         * Subtask 3.1.2:
-         * Please insert here the code that collectively copies 
-         *    with the Ty x Tx threads of the Cuda block the
-         *    following slice of B: 
-         *         B[kk : kk+Tk][jjj : jjj + Tx*Rx] 
-         *    to the shared-memory buffer Bloc, such that all accesses 
-         *    to B (and Bloc) are coalesced, i.e., consecutive
-         *    threads on the threadIdx.x dimension having the same
-         *    threadIdx.y value read consecutive locations in memory!
-         * If the index is out of the bounds of B then write 0 in Bloc.
-         
-  
-        // Please implement Task 3.1.2 here
-        // Copying slice of B to Bloc
         for (int j = 0; j < Rx; j++) {
             int row = kk + threadIdx.y;
             int col = jjj + threadIdx.x * Rx + j;
@@ -732,27 +690,11 @@ Briefly comment in your report on:
 
     the speedup is mainly achieved by preloading data that will be reused in the computation into shared memory instead of accessing global memory for every memory access.
 
-    \begin{itemize}
-        \item Naive matrix multiplication requires $O(N^3)$ global memory reads for $N \times N$ matrices.
-        \item Our tiled approach uses shared memory blocks of size $T \times T$ (where $T = 16$ in our case).
-        \item For each tile, we load $2T^2$ elements into shared memory ($T^2$ for A and $T^2$ for B).
-        \item We perform $T^3$ computations using these loaded elements.
-        \item The number of tiles is $(\frac{N}{T})^3$ for $N \times N$ matrices.
-    \end{itemize}
+    in the naive implementation we are reading from global memory $N^3$ elements, 
+    by preloading in block of size $T^2$ elements into shared memory. 
+    We reduce this to \((N/T)^2 \) and increase our reads from shared memory to $N^3$ (over multiple chunks)
+    this is a reduction by a factor of $T^2$ times (T=16) $16^2 = 256$ times. 
     
-    Therefore, the ratio of global memory reads between naive and tiled approaches is approximately:
-    
-    \[
-    \text{Reduction factor} \approx \frac{N^3}{2T^2 \cdot (\frac{N}{T})^3} = \frac{T}{2}
-    \]
-    
-    With $T = 16$, we get:
-    
-    \[
-    \text{Reduction factor} \approx \frac{16}{2} = 8
-    \]
-    
-    IE we are roughly reducing the number of global memory reads by 8.
 
 \end{itemize}
 
@@ -838,11 +780,6 @@ Briefly comment in your report on:
 
     \item report the performance in Gflops achieved by \textbf{your} GPU implementation
     
-    GPU Naive BMMM version runs in: 5894 microsecs, GFlops/sec: 2184.90
-    VALID RESULT!
-    GPU RegTiled BMMM simple version runs in: 2334.5 microsecs, GFlops/sec: 5516.36
-    VALID RESULT!
-
     \begin{table}[h]
         \centering
         \begin{tabular}{|l|c|c|c|}
@@ -862,10 +799,24 @@ Briefly comment in your report on:
     locality (e.g., by what factor has decreased the number of accesses to
     global memory).
 
-    The speedup is primarily achieved through improved temporal locality and reduced global memory accesses. By using shared memory to store a tile of the X matrix (size T=31), we significantly decrease the number of global memory reads. 
-    Concretely we reduce this by a factor of $K^2/T$ where(T=31 in our case)
-    
+    The speedup is primarily achieved through improved temporal locality and memory coalescing and reduced global memory accesses.
+    By using shared memory to store a tile of the X matrix (size T=31), we significantly decrease the number of global memory reads. 
 
+
+    Total accesses for naive implementation: $O(M \times K^2 \times N)$
+
+    for the optimized implementation:
+    \begin{itemize}
+        \item Accesses to X\_tr: Reduced from $O(M \times K^2 \times N)$ to $O(M \times N)$
+        \item Accesses to A and B: Remain $O(M \times K^2 \times N)$
+    \end{itemize}
+
+    Reduction factor for X\_tr accesses:
+    \[
+    \frac{O(M \times K^2 \times N)}{O(M \times N)} = O(K^2)
+    \]
+
+    thus we have a reduction by a factor of $O(K^2)$ in global memory accesses for X\_tr, while accesses to A and B remain unchanged
 
 
 \end{itemize}
