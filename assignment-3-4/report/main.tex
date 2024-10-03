@@ -5,6 +5,39 @@
 \usepackage{hyperref}
 \usepackage{tikz}
 
+
+\lstdefinelanguage{futhark}
+{
+  % list of keywords
+  morekeywords={
+    do,
+    else,
+    for,
+    if,
+    in,
+    include,
+    let,
+    loop,
+    then,
+    type,
+    val,
+    while,
+    with,
+    module,
+    def,
+    entry,
+    local,
+    open,
+    import,
+    assert,
+    match,
+    case,
+  },
+  sensitive=true, % Keywords are case sensitive.
+  morecomment=[l]{--}, % l is for line comment.
+  morestring=[b]" % Strings are enclosed in double quotes.
+}
+
 \title{Third and Fourth Weekly Assignment for the PMPH Course (21 pts total)}
 \author{Your Name Here}
 \date{}
@@ -266,7 +299,7 @@ Answer the following in your report:
             C[i,   j+1] = C[i, j] * A[i][2*j+1];
         }
     }
-
+    \end{lstlisting}
 
     Please show the code after interchange and annotate each loop
     with the comment \texttt{// parallel} or \texttt{// sequential}.
@@ -294,14 +327,71 @@ Reason about the loop-level parallelism of the code above and answer the followi
 
 \begin{enumerate}
     \item Why is the outer loop \textbf{not} parallel? 
+    
+    the loop is not parallel as all the threads will write to the same accum variable, and thus, we will have a race condition.
+
     \item Please explain what technique can be used to make it parallel and why is it safe to apply it?
   Re-write the code such that the outer loop is parallel, 
         i.e., the outer loop does not carry any dependencies.
+
+    we can use privatization of accum to remove inter iteration dependencies.
+    \begin{lstlisting}[language=c]
+    float accum, tmpA;
+    #pragma omp parallel for private(i, accum)
+    for (int i = 0; i < N; i++) { // outer loop
+        accum = 0;
+        for (int j = 0; j < 64; j++) { // inner loop
+            tmpA = A[i, j];
+            accum = sqrt(accum) + tmpA*tmpA; // (**)
+            B[i,j] = accum;
+        }
+    }
+    \end{lstlisting}
+
+
     \item Explain why the inner loop is \textbf{not} parallel.
+    
+    the inner loop is not parallel for much the same reason as the outer loop, just with respect to a different variable tmpA.
+
     \item Assume the line marked with \texttt{(**)} is re-written as \texttt{accum = accum + tmpA*tmpA}.
   Now it is possible to rewrite both the inner and the outer loop as a nested 
     composition of parallel operators! Please write in your report a 
     semantically-equivalent, nested-parallel Futhark program.
+
+    \begin{lstlisting}[language=c]
+        float accum, tmpA;
+        for (int i = 0; i < N; i++) { // outer loop
+            accum = 0;
+            for (int j = 0; j < 64; j++) { // inner loop
+                tmpA = A[i, j];
+                accum = accum  + tmpA*tmpA; // 
+                B[i,j] = accum;
+            }
+    }
+    \end{lstlisting}
+
+    in futhark this can be rewritten as composition of a map and a scan IE a segmented scan.
+
+    the code would look like this:
+
+    \begin{lstlisting}[language=futhark]
+    let bmm [n] (A: [n][64]i64) : [n][64]i64 =
+    map (\row ->
+    let squares = map (\x -> x*x) row
+    let scanned = scan (+) 0 squares
+    in scanned
+    ) A
+
+
+    -- compiled input { 30i64 }
+    entry main (N: i64) : [][]i64 = 
+    let A : [N][64]i64 = replicate N (iota 64)
+    let B = bmm A
+    in B
+  
+    \end{lstlisting}
+
+
 \end{enumerate}
 
 \textbf{Clarification:} at step 4. above, we ask you to use human reasoning to
