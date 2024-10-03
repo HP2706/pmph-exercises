@@ -3,6 +3,7 @@
 \usepackage{amsmath}
 \usepackage{listings}
 \usepackage{hyperref}
+\usepackage{tikz}
 
 \title{Third and Fourth Weekly Assignment for the PMPH Course (21 pts total)}
 \author{Your Name Here}
@@ -57,6 +58,7 @@ Also provide comments regarding the performance behavior of your programs:
     \end{itemize}
 \end{itemize}
 
+\newpage
 \section{Task 1: Pen and Paper Exercise Aimed at Applying Dependency-Analysis Transformations (3 pts)}
 
 Consider the C-like pseudocode below:
@@ -82,35 +84,193 @@ Your task is to apply privatization, array expansion, loop distribution
 and loop interchange in order to parallelize as many loops as possible.
 Answer the following in your report:
 
-\begin{enumerate}[a)]
+\begin{itemize}
     \item Explain why in the (original) code above \textbf{neither} the outer loop (of index \texttt{i})
     \textbf{nor} the inner loops (of indices \texttt{k} and \texttt{j}) \textbf{are parallel};
+
+    to answer this question, we can visualize the dependency for the two loop nests.
+
+    for i and k, we have that (i, k) reads from (k-1) in A, and thus, we cannot split up this computation, as we have a backward dependency.
+
+    for i, j we have that (i, j) reads from (i-1, j-1) in B, and by the same reasoning. 
+
     \item Explain why is it safe to privatize array \texttt{A};
+    
+    we can privatize A as we have a false cross-iteration Write after Write(WaW) dependency in the k loop.
+    this is true by the argument seen on slide 16/37 in loopparl5.pdf
+    
     \item Once privatized, please explain "informally" why is it safe to distribute 
     the outermost loop across the \texttt{A[0] = i+1;} statement and across the
     other two inner loops.  
-    Then perform (safely!) the loop distribution, while remembering to perform
-    array expansion for \texttt{A}. Show the resulted code.
-    
-    \textbf{Clarification:} "Informally" above means that you should use human reasoning
-    to show the dependency
-    graph between three (compound) statements/nodes: (1) statement \texttt{A[0] = i+1;}, 
-    (2) the compound statement that denotes the (entire) loop of index \texttt{k}, and
-    (3) the compound statement that denotes the loop of index \texttt{j}. Then show the
-    distribution according to the graph. 
-    We do not ask you to use direction-vectors above because we have not
-    applied them for imperfectly-nested loops.
+
+    After privatization of array \texttt{A}, it is safe to distribute the outermost loop because:
+
+    \begin{itemize}
+        \item The statement \texttt{A[0] = i+1;} only depends on the loop variable \texttt{i} and does not interact with other iterations.
+        \item The first inner loop (index \texttt{k}) operates on the privatized array \texttt{A} independently for each iteration of \texttt{i}.
+        \item The second inner loop (index \texttt{j}) uses values from \texttt{A} but does not modify it, and its operations on \texttt{B} and \texttt{C} depend only on the current \texttt{i} value.
+    \end{itemize}
+
+    Therefore, there are no loop-carried dependencies between these parts after privatization, making it safe to distribute the loop.
+
+    The distributed code with array expansion for \texttt{A} would look like this:
+
+    \begin{lstlisting}[language=C]
+    float A[N][2*M];  // Array expansion
+
+    for (int i = 0; i < N; i++) {
+        A[i][0] = i+1;
+    }
+
+    for (int i = 0; i < N; i++) {
+        for (int k = 1; k < 2*M; k++) {
+            A[i][k] = sqrt(A[i][k-1] * i * k);
+        }
+    }
+
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < M; j++) {
+            B[i+1, j+1] = B[i, j] * A[i][2*j  ];
+            C[i,   j+1] = C[i, j] * A[i][2*j+1];
+        }
+    }
+    \end{lstlisting}
+
     \item On the code resulted from the previous step, please reason in terms of direction
     vectors to determine which loops in each of (the resulted) three loop nests
     are parallel. Please explain why and annotate each loop with the comment
     \texttt{// parallel} or \texttt{// sequential}.
+
+    loop 1 is parallel as we are just writing to non overlapping memory locations in a
+    This would give us dependency matrix: [=, =] which can be parallelized.
+
+
+    \begin{tikzpicture}
+        % Axes
+        \draw[->,thick] (0,0) -- (0,4) node[above] {i};
+        \draw[->,thick] (0,0) -- (4,0) node[right] {j};
+        
+        % Grid points
+        \foreach \x in {1,2,3}
+            \foreach \y in {1,2,3}
+                \fill (\x,\y) circle (2pt);
+        
+        % Title
+        \node[above] at (2,4.5) {\Large Leftmost Loop};
+    \end{tikzpicture}
+
+    \begin{lstlisting}[language=c]
+        //parallel
+        for (int i = 0; i < N; i++) {
+            A[i][0] = i+1;
+        }
+    \end{lstlisting}
+
+    for the second loop each iteration of k depends on an earlier iteration of k.
+
+    we have the following system of equations to solve:
+
+    (i1, k1) = (i2, k2-1) which gives us the direction vector [=, <]
+
+    using the theorem from slide 10/37:
+    'Th. Parallelism: A loop in a loop nest is parallel iff all its directions
+    are either = or there exists an outer loop whose corresp. direction is <'
+    
+    the outer loop i is parallel, but the inner loop over k, as it has '<' direction and its outer loop does not have a '<' direction, cannot be parallelized.
+
+    \begin{tikzpicture}
+        % Axes
+        \draw[->,thick] (0,0) -- (0,4) node[above] {i};
+        \draw[->,thick] (0,0) -- (4,0) node[right] {k};
+
+        \draw[<-, thick] (0, 1) -- (1, 1);
+        \draw[<-, thick] (1,1) -- (2,1);
+        \draw[<-, thick] (2,1) -- (3,1);
+
+        \draw[<-, thick] (0, 2) -- (1, 2);
+        \draw[<-, thick] (1,2) -- (2,2);
+        \draw[<-, thick] (2,2) -- (3,2);
+
+        \draw[<-, thick] (0, 3) -- (1, 3);
+        \draw[<-, thick] (1,3) -- (2,3);
+        \draw[<-, thick] (2,3) -- (3,3);
+        
+        % Grid points
+        \foreach \i in {1,2,3}
+            \foreach \k in {1,2,3}
+                \fill (\i,\k) circle (2pt);
+        
+        % Title
+        \node[above] at (2,4.5) {\Large Leftmost Loop};
+    \end{tikzpicture}
+
+    \begin{lstlisting}[language=c]
+    //parallel
+    for (int i = 0; i < N; i++) {
+        // sequential 
+        for (int k = 1; k < 2*M; k++) {
+            A[i][k] = sqrt(A[i][k-1] * i * k);
+        }
+    }
+    \end{lstlisting}
+
+    for the last loop, we have 
+
+    we have the following system of equations to solve:
+
+    for B
+    (i1 + 1, j1 + 1) = (i2, j2) which gives us the direction vector [$<$, $<$]
+    for C
+    (a1, b1 + 1) = (a2, b2) which gives us the direction vector [=, $<$]
+ 
+
+    by the same reasoning as for the second loop, the read write to C cannot be parallelized on both levels but only the outer loop.
+    B can be parallelized on both levels and thus we could split it up into two
+
+    \begin{lstlisting}[language=c]
+    // parallel
+    for (int i = 0; i < N; i++) {
+        // parallel
+        for (int j = 0; j < M; j++) {
+            B[i+1, j+1] = B[i, j] * A[i][2*j  ];
+        }
+
+        //sequential
+        for (int j = 0; j < M; j++) {
+            C[i,   j+1] = C[i, j] * A[i][2*j+1];
+        }
+        
+    }
+    \end{lstlisting}
+    
+
     \item Explain in terms of direction-vectors why is it legal to apply loop
    interchange on the third (last) loop nest. After interchange, please
    re-analyze the parallelism of the two loops in the third nest; has
    something changed?
+
+    using the theorem from slide 12/37:
+    'Th. Loop Interchange: A column permutation of the loops in a loop
+    nest is legal iff permuting the direction matrix in the same way does
+    NOT result in a > direction as the leftmost non-= direction in a row.'
+
+    as interchange would imply [$<$, $<$] -> [$<$, $<$] for B 
+    and [$=$, $<$] -> [$<$, $=$] for C, loop interchange is legal.
+
+    our code now looks like this:
+
+    \begin{lstlisting}[language=c]
+    for (int j = 0; j < M; j++) {
+        for (int i = 0; i < N; i++) {
+            B[i+1, j+1] = B[i, j] * A[i][2*j  ];
+            C[i,   j+1] = C[i, j] * A[i][2*j+1];
+        }
+    }
+
+
     Please show the code after interchange and annotate each loop
     with the comment \texttt{// parallel} or \texttt{// sequential}.
-\end{enumerate}
+\end{itemize}
 
 \section{Task 2: Pen and Paper Exercise Aimed at Recognizing Parallel Operators (3 pts)}
 
