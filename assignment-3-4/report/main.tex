@@ -380,11 +380,11 @@ Reason about the loop-level parallelism of the code above and answer the followi
 
     \begin{lstlisting}[language=futhark]
     let bmm [n] (A: [n][64]i64) : [n][64]i64 =
-    map (\row ->
-    let squares = map (\x -> x*x) row
-    let scanned = scan (+) 0 squares
-    in scanned
-    ) A
+        map (\row ->
+            let squares = map (\x -> x*x) row
+            let scanned = scan (+) 0 squares
+            in scanned
+        ) A
 
 
     -- compiled input { 30i64 }
@@ -397,10 +397,6 @@ Reason about the loop-level parallelism of the code above and answer the followi
 
 
 \end{enumerate}
-
-\textbf{Clarification:} at step 4. above, we ask you to use human reasoning to
-derive a semantically-equivalent program that is fully parallel and is written
-in terms of the basic-blocks of functional programming, such as map, reduce, scan, etc. 
 
 \section{Task 3: Histogram-like Computation -- Cuda Exercise 1 (3 pts)}
 
@@ -436,14 +432,6 @@ solution code:
 if(gid < N) {
     uint32_t ind = inp_inds[gid];
 
-    /************************
-     *** Cuda Exercise 1: ***
-     * 
-     * Change the if condition to succeed
-     * only when the current index `ind` is
-     * within the bounds of the current chunk
-     * (less than UB and greater or equal to LB.)
-     ************************/
     if(ind < UB && ind >= LB) {
         float val = inp_vals[gid];
         atomicAdd((float*)&hist[ind], val);
@@ -452,7 +440,8 @@ if(gid < N) {
 \end{lstlisting}
 
 //TODO, better explanation
-the reason that allthough we are doing more memory accesses, the accesses are coalesced which cause the large improvement.
+the reason that allthough we are doing more accesses to global memory, 
+is that we add global memory accesses but improve the coalsced access in shared memory, which turns out to be more important.
 
 The implementation validates and we get following performance results with evaluating on an A100 40GB gpu
 
@@ -481,9 +470,7 @@ The programming task refers to implementing in folder \texttt{gpu-coalescing}:
 
 \begin{enumerate}
     \item In file \texttt{goldeSeq.h}, please \textbf{correctly} parallelize by means of OpenMP the outer loop \texttt{for(uint64\_t i = 0; i < num\_rows; i++) ...}. 
-    
-    \textbf{Hint:} Task 2 should have taught you what "correctly" means. If the parallel runtime is in the same ballpark as the sequential one, it probably means that it was incorrectly parallelized. (Yes, the incorrect code still validates, can you figure out why?)
-    
+
     \item The code of CUDA kernel \texttt{transKernel} in file \texttt{kernels.cu.h}, which works on the transposed versions of A and B, named \texttt{A\_tr} and \texttt{B\_tr}, respectively. Please search for keyword "Exercise" in file \texttt{kernels.cu.h} to find the implementation place.
 \end{enumerate}
 
@@ -512,10 +499,23 @@ Please include in your report:
     %Running CPU-Parallel Versions (OMP) demonstrating (un)coalesced accesses to global memory
     %Original Program runs on CPU in: 6811 microsecs, GB/sec: 78.824097
 
-    the non parallelized cpu implementation has a runtime of 343043 microsecs and a GB/s of 1.565025.
-    the parallelized cpu implementation has a runtime of 6811 microsecs and a GB/s of 78.824097.
-    thus the speedup is 343043 / 6811 ~ 50 in latency and 78.824097 / 1.565025 ~ 50 in throughput.
+    we get the following performance results:
 
+    \begin{table}[h]
+        \centering
+        \begin{tabular}{|l|c|c|c|}
+        \hline
+        \textbf{Implementation} & \textbf{Runtime (us)} & \textbf{GB/sec} & \textbf{Speedup} \\
+        \hline
+        CPU Original & 343043 & 1.565025 & - \\
+        CPU parallel & 6811 & 78.824097 & 50x \\
+        \hline
+        \end{tabular}
+        \caption{Performance comparison of baseline and optimized implementations}
+        \label{tab:performance-comparison}
+    \end{table}
+
+    
     \item the CUDA-kernel code implementing your solution, i.e., present the code and comment on
     its correctness and on how it optimizes spatial locality (i.e., coalesced
     access to global memory). For example, why do
@@ -529,25 +529,27 @@ Please include in your report:
     template<class ElTp>
     __global__ void 
     transKernel(ElTp* A_tr, ElTp* B_tr, uint32_t num_rows, uint32_t num_cols) {
-            uint32_t gid = blockIdx.x * blockDim.x + threadIdx.x;
-            if(gid >= num_rows) return;
-        
-            ElTp accum = 0;
-            for(int j=0; j<num_cols; j++) {
-                ElTp el_a  = A_tr[j*num_rows + gid];
-                accum = sqrt(accum) + el_a * el_a;
-                B_tr[j*num_rows + gid] = accum;
-            }
+        uint32_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+        if(gid >= num_rows) return;
+    
+        ElTp accum = 0;
+        for(int j=0; j<num_cols; j++) {
+            ElTp el_a  = A_tr[j*num_rows + gid];
+            accum = sqrt(accum) + el_a * el_a;
+            B_tr[j*num_rows + gid] = accum;
         }
+    }
     \end{lstlisting}
 
-
-
-
-    \item specify whether your CUDA implementation validates. (The handin does not, since that kernel is for you to implement).
-    \item report the GB/sec achieved by \textbf{your} GPU implementation and of
-    the GPU \textbf{baseline} , and also report the speedup w.r.t. the
-    baseline.
+    \begin{enumerate}
+        \item \textbf{Correctness:} The kernel maintains the same computation logic as the naive version, but operates on transposed matrices. The accumulation and result calculation remain identical, ensuring correctness.
+        
+        \item \textbf{Coalesced memory access:} In the optimized kernel, consecutive threads access consecutive memory locations (e.g., \texttt{A\_tr[j*num\_rows + gid]}), resulting in coalesced memory access. This is in contrast to the naive kernel where threads access memory with stride \texttt{num\_cols}.
+        
+        \item \textbf{Improved performance despite more memory accesses:} While the optimized version performs 3x more global memory accesses due to the initial transposition, the benefit of coalesced access far outweighs this cost. Coalesced access allows for efficient use of memory bandwidth, reducing the overall memory access latency and improving throughput.
+        
+        \item \textbf{Better cache utilization:} The coalesced access pattern leads to better utilization of the L1 and L2 caches, as each cache line fetched contains useful data for multiple threads.
+    \end{enumerate}
 
     performance results:
     \begin{table}[h]
@@ -565,16 +567,40 @@ Please include in your report:
     \end{table}
 
     \item briefly explain why the CPU implementation that uses GPU-like
-  coalescing has abysmal performance (i.e., much slower than the baseline).
+    coalescing has abysmal performance (i.e., much slower than the baseline).
     
     Program with GPU-like coalescing runs on CPU in: 696606 microsecs, GB/sec: 0.770695
-    this performance is abysmal due to the fundamental difference in how memory is used on gpus vs cpus. 
-    on gpus, having consecutive threads access consecutive memory is optimal, as this is coalesced, 
-    on the other hand this is not optimal for cpus, as they rely heavily on caching for performance.
+    This performance is abysmal due to the fundamental difference in how memory is designed to be used on gpus vs cpus. 
+    On gpus, having consecutive threads in a block access consecutive memory is optimal, as this is coalesced, 
+    On the other hand this is not optimal for cpus, as they rely heavily on caching for performance.
     When using GPU-like coalescing on a CPU, each thread accesses memory that is far apart, leading to poor cache line utilization. 
+    That is, the same approach that creates locality on the gpu destroys locality on the cpu
 
     \item \textbf{BONUS} briefly explain at a very high level, why/how
     "the Optimal-GPU Program" is about 2x faster than your implementation.
+
+    The "Optimal-GPU Program" achieves about 2x speedup over the transposed implementation primarily due to its more efficient use of GPU resources. While both kernels ensure coalesced memory access, the optimal version goes a step further by utilizing shared memory as a cache. It processes data in chunks (\texttt{CHUNK}), reducing global memory transactions significantly:
+
+    \begin{lstlisting}[language=cuda]
+    for(int jj=0; jj<num_cols; jj+=CHUNK) {
+        // Load chunk to shared memory
+        // Process data in shared memory
+        // Write results back to global memory
+    }
+    \end{lstlisting}
+
+    This approach contrasts with the transposed kernel's direct global memory access for each element:
+
+    \begin{lstlisting}[language=cuda]
+    for(int j=0; j<num_cols; j++) {
+        ElTp el_a  = A_tr[j*num_rows + gid];
+        // Process and write back to global memory
+    }
+    \end{lstlisting}
+
+    The optimal kernel's chunked processing also allows for better instruction-level parallelism and reduces potential thread divergence. By leveraging shared memory and minimizing global memory accesses, the optimal kernel makes more efficient use of the GPU's memory bandwidth, leading to the observed performance improvement.
+
+
    ("the Optimal-GPU Program" is the last GPU program run by the Makefile)
 \end{itemize}
 
@@ -597,7 +623,7 @@ Briefly comment in your report on:
     the code is as follows:
 
     \begin{lstlisting}[language=cuda]
-        for(int kk = 0; kk < widthA; kk += Tk) {
+    for(int kk = 0; kk < widthA; kk += Tk) {
         /***************************************
          * Cuda Exercise 3:
          * Task 3.1:
@@ -677,8 +703,8 @@ Briefly comment in your report on:
     }
     \end{lstlisting}
 
-    as we are accessing consecutive memory locations in the shared memory, the accesses are coalesced.
-    //TODO better explanation
+    For matrix A, the code uses \texttt{threadIdx.x} to access consecutive columns within each row, ensuring that adjacent threads read contiguous memory locations. 
+    Similarly, for matrix B, the code uses \texttt{threadIdx.x * Rx + j} to access consecutive elements within each row, maintaining coalesced access. 
     
     \item report the performance in Gflops achieved by \textbf{your} GPU implementation
     and by the GPU \textbf{baseline} , and also report the speedup w.r.t. the
@@ -704,7 +730,30 @@ Briefly comment in your report on:
     locality (e.g., by what factor has decreased the number of accesses to
     global memory).
 
-    TODO
+    the speedup is mainly achieved by preloading data that will be reused in the computation into shared memory instead of accessing global memory for every memory access.
+
+    \begin{itemize}
+        \item Naive matrix multiplication requires $O(N^3)$ global memory reads for $N \times N$ matrices.
+        \item Our tiled approach uses shared memory blocks of size $T \times T$ (where $T = 16$ in our case).
+        \item For each tile, we load $2T^2$ elements into shared memory ($T^2$ for A and $T^2$ for B).
+        \item We perform $T^3$ computations using these loaded elements.
+        \item The number of tiles is $(\frac{N}{T})^3$ for $N \times N$ matrices.
+    \end{itemize}
+    
+    Therefore, the ratio of global memory reads between naive and tiled approaches is approximately:
+    
+    \[
+    \text{Reduction factor} \approx \frac{N^3}{2T^2 \cdot (\frac{N}{T})^3} = \frac{T}{2}
+    \]
+    
+    With $T = 16$, we get:
+    
+    \[
+    \text{Reduction factor} \approx \frac{16}{2} = 8
+    \]
+    
+    IE we are roughly reducing the number of global memory reads by 8.
+
 \end{itemize}
 
 \section{Task 6: Batched Matrix Multiplication Under a Mask -- Cuda Exercise 4 (4 pts)}
@@ -812,6 +861,13 @@ Briefly comment in your report on:
     this speedup, i.e., how did your implementation improved the temporal
     locality (e.g., by what factor has decreased the number of accesses to
     global memory).
+
+    The speedup is primarily achieved through improved temporal locality and reduced global memory accesses. By using shared memory to store a tile of the X matrix (size T=31), we significantly decrease the number of global memory reads. 
+    Concretely we reduce this by a factor of $K^2/T$ where(T=31 in our case)
+    
+
+
+
 \end{itemize}
 
 \end{document}
