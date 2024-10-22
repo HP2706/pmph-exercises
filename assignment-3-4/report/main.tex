@@ -43,7 +43,7 @@
 }
 
 \title{Third and Fourth Weekly Assignment for the PMPH Course (21 pts total)}
-\author{Your Name Here}
+\author{Hans Peter, pvr448}
 \date{}
 
 \begin{document}
@@ -443,6 +443,8 @@ if(gid < N) {
 the reason that allthough we are doing more accesses to global memory, 
 is that we add global memory accesses but improve the coalsced access in shared memory, which turns out to be more important.
 
+
+
 The implementation validates and we get following performance results with evaluating on an A100 40GB gpu
 
 \begin{table}[h]
@@ -460,6 +462,9 @@ The implementation validates and we get following performance results with evalu
     \caption{Performance comparison of histogram implementations}
     \label{tab:histogram-performance}
     \end{table}
+
+
+The multi-step kernel achieves better performance by reducing cache thrashing. By processing the histogram in smaller chunks (LB to UB), it ensures that each chunk fits within the GPU's last-level cache. This significantly reduces cache misses and improves memory access efficiency. Although it performs more global memory accesses overall, the improved cache utilization and reduced memory latency outweigh this cost
 
 
 \section{Task 4: Optimizing Spatial Locality by Transposition -- CUDA exercise 2 (4 pts)}
@@ -689,12 +694,31 @@ Briefly comment in your report on:
     global memory).
 
     the speedup is mainly achieved by preloading data that will be reused in the computation into shared memory instead of accessing global memory for every memory access.
-
-    in the naive implementation we are reading from global memory $N^3$ elements, 
-    by preloading in block of size $T^2$ elements into shared memory. 
-    We reduce this to \((N/T)^2 \) and increase our reads from shared memory to $N^3$ (over multiple chunks)
-    this is a reduction by a factor of $T^2$ times (T=16) $16^2 = 256$ times. 
     
+
+    In the naive implementation, assuming $N = \text{heightA} = \text{widthA} = \text{widthB}$, we are reading from global memory $2N^3$ elements ($N^3$ reads each for matrices A and B).
+
+    In our tiled implementation, with tile dimensions $T = T_x = T_y = T_k$, and $R = R_x = R_y$:
+    
+    \begin{enumerate}
+        \item We load tiles of size $T \times T \times R$ for both A and B into shared memory.
+        \item These tiles are reused $T$ times within each block.
+        \item We need $(N/T)^3$ such tile loads to cover the entire computation.
+    \end{enumerate}
+    
+    So, the number of global memory reads in the tiled version is:
+    
+    \[ 2 \cdot (N/T)^3 \cdot T \cdot T \cdot R = 2N^3R/T \]
+    
+    Comparing this to the naive version:
+    
+    \[ \text{Reduction factor} = \frac{2N^3}{2N^3R/T} = T/R \]
+    
+    With $T = 16$ and $R = 4$ in our implementation, we get a reduction factor of $16/4 = 4$.
+    
+    This means we've reduced global memory accesses by a factor of 4, which significantly improves temporal locality and contributes to the observed speedup.
+    
+    Additionally, the use of shared memory allows for faster access to the preloaded data, further improving performance. The tiled approach also enables better use of the GPU's parallel processing capabilities by allowing multiple thread blocks to work concurrently on different tiles.    
 
 \end{itemize}
 
